@@ -6,7 +6,9 @@ import { SOURCE_CATALOG } from "./market-ops/catalog.mjs";
 import { runIngest, runRefresh } from "./market-ops/refresh.mjs";
 import { validateSnapshot } from "./market-ops/snapshot.mjs";
 import { buildSnapshotTemplate } from "./market-ops/snapshot-template.mjs";
-import { applyPrivateObservation, pruneExpired, retractObservation, withDatabase } from "./market-ops/store.mjs";
+import { applyPrivateObservation, pruneExpired, retractObservation, restoreSuppressedListing, withDatabase } from "./market-ops/store.mjs";
+import { refreshExitCode } from "./market-ops/run-outcome.mjs";
+import { databaseHealth } from "./market-ops/database-health.mjs";
 import { readPrivateObservation } from "./market-ops/private-observation.mjs";
 import { buildBunjangCatalogSnapshot, bunjangCatalogGeneratedAt } from "./market-ops/collectors/bunjang-catalog.mjs";
 import { createBunjangSearchCollector } from "./market-ops/collectors/bunjang-search.mjs";
@@ -25,6 +27,7 @@ function help() {
 
 Usage:
   node scripts/market-ops.mjs status
+  node scripts/market-ops.mjs health
   node scripts/market-ops.mjs refresh [--snapshot <reviewed.json> ...] [--scheduled]
   node scripts/market-ops.mjs refresh --inbox [--scheduled]
   node scripts/market-ops.mjs refresh --bunjang-config .ops-private/bunjang/collector-config.json [--scheduled]
@@ -45,6 +48,7 @@ Usage:
   node scripts/market-ops.mjs private-history <note-id>
   node scripts/market-ops.mjs sample-readiness
   node scripts/market-ops.mjs retract <source-id> <external-id> <reason-code> <private-evidence-ref>
+  node scripts/market-ops.mjs restore <source-id> <external-id> <private-evidence-ref> <reviewer-role>
   node scripts/market-ops.mjs prune
 
 Snapshot files must contain only reviewed metadata. See docs/6플랫폼-MVP-2-3단계.md.
@@ -482,19 +486,25 @@ async function showPrivateHistory(noteId) {
 async function retractPublicObservation(sourceId, externalId, reasonCode, evidenceRef) {
   const result = await withDatabase(dataDir, async (db) => retractObservation(db, sourceId, externalId, reasonCode, evidenceRef));
   if (!result.retracted) {
-    console.log(`No local public snapshot observation found for ${sourceId}:${externalId}; no changes made.`);
+    console.log(`Already suppressed ${sourceId}:${externalId}; no observations or history restored.`);
     return;
   }
   console.log(`Retracted ${sourceId}:${externalId} from the local public snapshot store.`);
   console.log(`  Removed observations: ${result.observationsRemoved}; price-history events: ${result.priceEventsRemoved}`);
   console.log(`  Correction reason: ${reasonCode}; private evidence reference: ${evidenceRef}`);
-  console.log("This command does not contact a platform or change the public site. Re-import only after a fresh human review.");
+  console.log("Future imports for this listing are suppressed. Restore with reviewed evidence, then collect a newer observation before re-importing. The public site must be corrected separately.");
 }
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   if (!command || command === "help" || command === "--help" || command === "-h") return help();
   if (command === "status" && !args.length) return showStatus();
+  if (command === "health" && !args.length) {
+    const health = await databaseHealth(dataDir);
+    console.log(JSON.stringify(health, null, 2));
+    process.exitCode = health.exitCode;
+    return;
+  }
   if (command === "refresh") {
     const options = parseRefreshArgs(args);
     if (options.inbox) options.snapshotFiles = await listInboxSnapshots();
@@ -503,6 +513,7 @@ async function main() {
       : {};
     const result = await runRefresh({ dataDir, snapshotFiles: options.snapshotFiles, collectors, runOrigin: options.runOrigin });
     printRun(result.run);
+    process.exitCode = refreshExitCode(result.run);
     return;
   }
   if (command === "template" && args.length <= 1) return createTemplates(args[0]);
@@ -537,6 +548,11 @@ async function main() {
     return;
   }
   if (command === "retract" && args.length === 4) return retractPublicObservation(args[0], args[1], args[2], args[3]);
+  if (command === "restore" && args.length === 4) {
+    const result = await withDatabase(dataDir, async (db) => restoreSuppressedListing(db, ...args));
+    console.log(JSON.stringify(result));
+    return;
+  }
   if (command === "prune" && !args.length) {
     const pruned = await withDatabase(dataDir, async (db) => pruneExpired(db));
     console.log(`Removed ${pruned.observations} observations, ${pruned.priceEvents} price events, ${pruned.reviewLedger} review records.`);

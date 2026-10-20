@@ -79,6 +79,29 @@ test("UI consumes only the reviewed global price array even if nested prices rea
   assert.equal(vm.runInContext("recordsFor(marketData.candidates[0])[0].id", context), global.id);
 });
 
+test("UI sorts offset timestamps by instant and keeps bid, auction result, settlement, and retail filters separate", async () => {
+  const source = (await readFile(path.join(root, "assets/market.js"), "utf8")).replace(/\bstart\(\);\s*$/, "");
+  const element = { scrollTop: 0, innerHTML: "", querySelectorAll: () => [], querySelector: () => ({ addEventListener() {} }) };
+  const context = vm.createContext({ document: { querySelector: () => element }, localStorage: { getItem: () => null }, window: { location: { href: "http://localhost/" } }, URL });
+  vm.runInContext(source, context);
+  context.records = [row({ id: "older-offset", checkedAt: "2026-10-21T03:00:00+09:00" }), row({ id: "newer-utc", checkedAt: "2026-10-20T21:00:00Z" }), row({ id: "invalid", checkedAt: "invalid" })];
+  assert.equal(vm.runInContext("sortRecordsNewestFirst(records)[0].id", context), "newer-utc");
+  assert.equal(vm.runInContext("latestObservedDate(records)", context), "2026-10-20T21:00:00Z");
+  context.syntheticData = fixture();
+  context.syntheticData.observations = ["asking", "auction_current_bid", "auction_final_bid", "sold_verified", "official_retail", "auction", "sold"].map((kind, index) => row({ id: "kind-" + index, kind, sourceId: index === 0 ? "bunjang" : "break", price: (index + 1) * 1000 }));
+  vm.runInContext("marketData = syntheticData", context);
+  assert.equal(vm.runInContext("countByKind(allRecords(), 'auction_current_bid')", context), 1);
+  assert.equal(vm.runInContext("countByKind(allRecords(), 'auction_final_bid')", context), 2);
+  assert.equal(vm.runInContext("countByKind(allRecords(), 'sold_verified')", context), 2);
+  vm.runInContext("renderDialog(findCard('synthetic-test-card'), 'auction_current_bid', 'break')", context);
+  assert.match(element.innerHTML, /at-\d+ lane-0/);
+  assert.match(element.innerHTML, /확인 당시 경매 진행 호가/);
+  assert.match(element.innerHTML, /진행 중 확인한 입찰가/);
+  assert.equal((element.innerHTML.match(/class="price-plot-row"/g) ?? []).length, 1);
+  assert.match(element.innerHTML, /배송비 확인 전/);
+  assert.doesNotMatch(element.innerHTML, /각 점은 확인 당시 판매 희망가/);
+});
+
 test("Worker build preserves PNG bytes and validates all ten GET/HEAD/304 routes with byte-based ETags", async (t) => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "scc-worker-publication-"));
   t.after(async () => {

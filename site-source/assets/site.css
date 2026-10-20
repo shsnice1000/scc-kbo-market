@@ -241,3 +241,18 @@
   .hero-search-hint,.catalog-intro,.section-heading-row p,.source-description,.source-status,.filter-note p,.field-label,.filter-group legend,.filter-choice,.card-team,.card-subtitle,.card-price-empty,.market-count,.card-detail-button,.records-footnote,.how-lead p,.how-step p,.footer-main>p,.footer-bottom,.source-meta{font-size:11px}
   .stat-label,.stat-note,.snapshot-date>span:last-child,.source-kind{font-size:10px}
 }
+
+/* Keep the explanatory graphic secondary to card identity and price evidence. */
+#dialog-content>.card-visual{height:180px;min-height:0;aspect-ratio:auto;margin-bottom:20px}
+.dialog-title-row>.type-badge{flex-shrink:0;white-space:nowrap}
+.record-tabs{flex-wrap:wrap}
+.record-tab{min-height:40px}
+.price-plot-point:focus-visible{outline:3px solid var(--green);outline-offset:4px;z-index:3}
+@media(max-width:680px){
+  #dialog-content>.card-visual{height:125px;margin-bottom:16px}
+  .record-tab{flex:1 1 43%;min-height:44px}
+  .source-filter{min-height:40px}
+  .price-plot-source>div{flex:1 1 45%;min-width:0;flex-wrap:wrap;gap:2px 7px}
+  .price-plot-source h4,.price-plot-source>div>span{white-space:nowrap}
+  .price-plot-source small{flex:1 1 50%;min-width:0;max-width:55%;font-size:10px}
+}

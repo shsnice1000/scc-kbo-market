@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "exportedAt": "2026-10-20T14:00:07.051Z",
+  "exportedAt": "2026-10-20T23:14:47.540366+00:00",
   "scope": "allowlisted code and synthetic fixtures; fresh collaboration history",
   "files": [
     {
@@ -49,15 +49,19 @@
     },
     {
       "path": "docs/HANDOFF.md",
-      "sha256": "2b6a5ca4ddb0e011ed740df580da3688c3a990af1e20a7d90c7251e9baf30a0e"
+      "sha256": "efd7999569d78d866e138339c82268f3860585cc918d6ef681e227573308f78e"
     },
     {
       "path": "docs/KNOWN_LIMITATIONS.md",
-      "sha256": "2a391625c51027d69cb4ad02dab4264d0cb6ea1f8115e81bbf37a13518aa323e"
+      "sha256": "daff160f8b56e016cee1ce8ec82b5192d88df6b42dfca8987194cbe940c6f832"
+    },
+    {
+      "path": "docs/PUBLICATION.md",
+      "sha256": "441c296ed4ccc5a1f46db498c91b997d77524bd96a382439885d3f90438820f6"
     },
     {
       "path": "package.json",
-      "sha256": "c6f5a365ec5e0d5601cbfd925c2fdd67e0785c6905e17ca670f269b385bcf649"
+      "sha256": "bb33f8e12589d4667d9551a01e83979214f96b6778f77d7d6ce0f00b279fc716"
     },
     {
       "path": "scripts/dev-check.mjs",
@@ -73,7 +77,7 @@
     },
     {
       "path": "scripts/market-ops.mjs",
-      "sha256": "044f0174de8963ea70e30b3b28015b99f81bcfc194c75445ccc9164825435442"
+      "sha256": "76819989749b78f112234dd09a410b22aba7d026d6be3699151b7063f2708092"
     },
     {
       "path": "scripts/market-ops/catalog.mjs",
@@ -88,12 +92,20 @@
       "sha256": "8cfe8825e949d856eae47587710efd45b5b3314da302c5c763a4ac3a75299669"
     },
     {
+      "path": "scripts/market-ops/database-health.mjs",
+      "sha256": "dd850daeebbe83a0f6224b16a562ae36326466925ec86353aa662c5495b0facd"
+    },
+    {
       "path": "scripts/market-ops/identity.mjs",
       "sha256": "35e7171ad696f9d9420f38a7b8d16131a360384042e8f6d47bf06af5fbf7c21f"
     },
     {
       "path": "scripts/market-ops/identity.test.mjs",
       "sha256": "a3a87b9b5ab543fecfaa69596a436a2c40ae77ed615c672b9eade6925c5e1945"
+    },
+    {
+      "path": "scripts/market-ops/lifecycle.test.mjs",
+      "sha256": "a1ee23cd7c778ae5feb8b906883cf7910959020795a9ac9857cad3d5714596d6"
     },
     {
       "path": "scripts/market-ops/market-ops.test.mjs",
@@ -117,11 +129,15 @@
     },
     {
       "path": "scripts/market-ops/refresh.mjs",
-      "sha256": "dedbb812f68fde720069c0e52fb9acbd03cd171f2ecbd90dee1f1f10e3c6cb87"
+      "sha256": "b2e30856e04d6f971982d3743af20b3450f95fc323eed77872eb0c28dfe57f04"
     },
     {
       "path": "scripts/market-ops/review-queue.mjs",
       "sha256": "f1d0c2dde93cdbe8484de5609655de75fc02c135de50569ba6c561cae7e22e29"
+    },
+    {
+      "path": "scripts/market-ops/run-outcome.mjs",
+      "sha256": "df14c6c51c9e10d55a84ce6c2efec804563505790fb957a037e625bdb2f29da8"
     },
     {
       "path": "scripts/market-ops/sample-readiness.mjs",
@@ -137,11 +153,11 @@
     },
     {
       "path": "scripts/market-ops/store.mjs",
-      "sha256": "7ece4a14fdb5d83b59b1d68622c2acda7f4f5d7f1e9af5b5b46456707e454e86"
+      "sha256": "3effde8f766cdf674188f2fad79714cffccd684ce924340e6027e6ae51e97140"
     },
     {
       "path": "scripts/public-preflight.mjs",
-      "sha256": "3406275311e39ca69fdd2e7ed28c4dfc70d1027a5abfc8f841984f09fbcc49a8"
+      "sha256": "01dd057ceee0552d435e697e2146503812474aab37161498d3f0816088c56396"
     },
     {
       "path": "site-source/.openai/hosting.example.json",
@@ -153,7 +169,7 @@
     },
     {
       "path": "site-source/assets/market.js",
-      "sha256": "9f72c509f175e87f5e3ec227ed235733bf9d785835668df86714fc0e0d39d477"
+      "sha256": "74bbbf1acd81d7e484f1432b9c4611b1bc40c36b249f27c3e3cc75fb678045c0"
     },
     {
       "path": "site-source/assets/og-preview.png",
@@ -165,7 +181,7 @@
     },
     {
       "path": "site-source/assets/site.css",
-      "sha256": "25ae79f56b3f1357ecd1c09559000f78a488d715516025ed45c6e7dafec310dc"
+      "sha256": "04da676085ffb5a3d08a180ba38ad1fb5f8033a5f6aa7f7d7b53be7ac9524e94"
     },
     {
       "path": "site-source/data/market.json",
@@ -189,27 +205,47 @@
     },
     {
       "path": "site-source/scripts/import-reviewed-snapshot.mjs",
-      "sha256": "1110ebf5c7922ff38eb8cfd9be12e185962c0af32b3e460d2a2cc29845edc21f"
+      "sha256": "e8f2765b678162890ee3d0df0120783e783a073f00f2f8ced238f0380ea4b5f8"
     },
     {
       "path": "site-source/scripts/publication.test.mjs",
-      "sha256": "50ec3ded2ddf353e5076f431941b23802cc3890e1379003adc86baca8628a559"
+      "sha256": "29aaaa2f356db6f48b8d0c755e536ff1ead733d9f4c71c07daa4021b254f9127"
+    },
+    {
+      "path": "site-source/scripts/release-evidence.mjs",
+      "sha256": "8e1280fedc6307a756f7bed37ac05e2578fe809f18097a1762029193dd61b7e6"
+    },
+    {
+      "path": "site-source/scripts/release-evidence.test.mjs",
+      "sha256": "db92fc57379af64f114e66472a2328fd14eee16ef566f40ac62e4fb716743b3b"
+    },
+    {
+      "path": "site-source/scripts/review-policy.mjs",
+      "sha256": "9fc0bf5b9b9b985e36f40030289994c80629728f695832e5f923b5074500d54c"
+    },
+    {
+      "path": "site-source/scripts/reviewed-snapshot.mjs",
+      "sha256": "dcaa3934bfbec92eecc55c9c9fd47ebfddda47142daca9497d436e19135a20a3"
+    },
+    {
+      "path": "site-source/scripts/reviewed-snapshot.test.mjs",
+      "sha256": "bd9dc155365fab2a24e41b7b70c0c3a1c50c32aea99058f58cccd8d346c1b626"
     },
     {
       "path": "site-source/scripts/validate-catalog-ledger.mjs",
-      "sha256": "264cef299f08f219aabe75885109c2b5933174ec34f2ac1c70b62d2b663cfd47"
+      "sha256": "af674e2e154d43f9280fba7e29a4f2d22bcc99b83fae2f29db6cf250a5134449"
     },
     {
       "path": "site-source/scripts/validate-market.mjs",
-      "sha256": "1fd3796a7bbc9dfca028b645c88a2b31771f365f953a0ddf8c63b762419a4c34"
+      "sha256": "8c163e737a4007a0f721b58f5722adfaccef19d669cfe2979b5cad0ef0490f18"
     },
     {
       "path": "site-source/scripts/validate-release-readiness.mjs",
-      "sha256": "d9a488a34b5dd0b8900fdfee3445911648af3d1587d2bc262fde8114ef2bc09c"
+      "sha256": "69c27eeff0bcc7070f9617437ccd01718a166d3eed2b7339eedfef073096e014"
     },
     {
       "path": "site-source/scripts/validate-review-ledger.mjs",
-      "sha256": "5359fe05013c070857c74c0cffa65605e232e0a030cebd03e7210fffba1e0dc6"
+      "sha256": "13c900504c9eaf51e5adfdc4929fdde44ba8f2128c270deb0df411b5e5185ac8"
     },
     {
       "path": "site-source/scripts/validate-static-dist.mjs",

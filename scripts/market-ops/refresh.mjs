@@ -218,6 +218,7 @@ function applySnapshotBatch(db, snapshots, runId, now) {
   return {
     imported: results.reduce((sum, item) => sum + item.imported, 0),
     eventsAdded: results.reduce((sum, item) => sum + item.eventsAdded, 0),
+    suppressed: results.reduce((sum, item) => sum + (item.suppressed ?? 0), 0),
     duplicate: results.every((item) => item.duplicate),
     snapshotCount: snapshots.length,
   };
@@ -340,6 +341,7 @@ async function runRefreshLocked({ dataDir, snapshotFiles = [], collectors = {}, 
             state,
             imported: imported.imported,
             eventsAdded: imported.eventsAdded,
+            suppressed: imported.suppressed ?? 0,
             coverage: lastSnapshot.coverage,
             ...(snapshotBatch ? { snapshotBatch } : {}),
             error: null,

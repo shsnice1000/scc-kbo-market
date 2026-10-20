@@ -59,7 +59,7 @@ function validateUrl(raw, sourceId, label, fail) {
   }
 }
 
-export function validateMarket(data, label = "market.json", { now = Date.now(), siteRoot = root } = {}) {
+export function validateMarket(data, label = "market.json", { now = Date.now(), siteRoot = root, pendingRecords = [] } = {}) {
   const errors = [];
   const warningSet = new Set();
   const fail = (message) => errors.push(label + ": " + message);
@@ -171,11 +171,11 @@ export function validateMarket(data, label = "market.json", { now = Date.now(), 
     }
     for (const key of ["title", "matchNote"]) if (PII.test(String(row[key] ?? ""))) fail("observation " + row.id + " appears to contain personal contact information");
   }
-  const ledger = validateReviewLedger(data, siteRoot);
+  const ledger = validateReviewLedger(data, siteRoot, { now, pendingRecords });
   if (ledger.missingCount > 0) fail("public observations must all have private source-review records; missing " + ledger.missingCount);
   for (const warning of ledger.warnings) warningSet.add(warning);
   for (const error of ledger.errors) fail("private review ledger: " + error);
-  const catalogReview = validateCatalogReviewLedger(data, siteRoot);
+  const catalogReview = validateCatalogReviewLedger(data, siteRoot, { now });
   for (const error of catalogReview.errors) fail("private catalog review: " + error);
   return { errors, warnings: [...warningSet] };
 }
