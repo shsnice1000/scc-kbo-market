@@ -31,15 +31,18 @@ for (const relativePath of mirroredFiles) {
 }
 
 const records = routes.map(([route, relativePath, contentType]) => {
-  const body = fs.readFileSync(path.join(root, relativePath), "utf8");
-  const digest = createHash("sha256").update(body, "utf8").digest("hex");
-  return { route, body, contentType, etag: '"sha256-' + digest + '"' };
+  const bytes = fs.readFileSync(path.join(root, relativePath));
+  const encoding = contentType === "image/png" ? "base64" : "utf8";
+  const body = bytes.toString(encoding);
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  return { route, body, encoding, contentType, etag: '"sha256-' + digest + '"' };
 });
 
 const lines = [
   "const ASSETS = new Map([",
   ...records.map((asset) =>
     "  [" + JSON.stringify(asset.route) + ", { body: " + JSON.stringify(asset.body) +
+    ", encoding: " + JSON.stringify(asset.encoding) +
     ", contentType: " + JSON.stringify(asset.contentType) +
     ", etag: " + JSON.stringify(asset.etag) + " }],"
   ),
@@ -75,7 +78,8 @@ const lines = [
   "    if (!asset) return new Response('Not found', { status: 404, headers: headersFor(404, 'text/plain; charset=utf-8') });",
   "    const headers = headersFor(200, asset.contentType, asset.etag);",
   "    if (matchesEtag(request.headers.get('If-None-Match'), asset.etag)) return new Response(null, { status: 304, headers });",
-  "    return new Response(method === 'HEAD' ? null : asset.body, { status: 200, headers });",
+  "    const body = method === 'HEAD' ? null : asset.encoding === 'base64' ? Uint8Array.from(atob(asset.body), (char) => char.charCodeAt(0)) : asset.body;",
+  "    return new Response(body, { status: 200, headers });",
   "  }",
   "};",
 ].join('\n') + '\n';

@@ -49,15 +49,15 @@
     },
     {
       "path": "docs/HANDOFF.md",
-      "sha256": "54a5951828a23e1e3fc7f148bde53e6e7efbf67b1798283335279f80e5144329"
+      "sha256": "2b6a5ca4ddb0e011ed740df580da3688c3a990af1e20a7d90c7251e9baf30a0e"
     },
     {
       "path": "docs/KNOWN_LIMITATIONS.md",
-      "sha256": "513432a521f45b2d406012a3cad0d08d26b49f988c9f331cc36f5a80cecc906b"
+      "sha256": "2a391625c51027d69cb4ad02dab4264d0cb6ea1f8115e81bbf37a13518aa323e"
     },
     {
       "path": "package.json",
-      "sha256": "9e1cd93ebe604b1751c3e8b752a33fe72fdc3b0963e4e512a2dc15f9c9b2e617"
+      "sha256": "c6f5a365ec5e0d5601cbfd925c2fdd67e0785c6905e17ca670f269b385bcf649"
     },
     {
       "path": "scripts/dev-check.mjs",
@@ -153,7 +153,7 @@
     },
     {
       "path": "site-source/assets/market.js",
-      "sha256": "b70cbd09f2702a62b5c7ccbb169f27e4f12c84a590fbca8ae679fba9dec3ceba"
+      "sha256": "9f72c509f175e87f5e3ec227ed235733bf9d785835668df86714fc0e0d39d477"
     },
     {
       "path": "site-source/assets/og-preview.png",
@@ -181,7 +181,7 @@
     },
     {
       "path": "site-source/scripts/build-worker.mjs",
-      "sha256": "3ee726b2f5ff85b42255daa9840b44e87075bdb109ded709b83cf69da6753332"
+      "sha256": "872607522e7817a17a60c175b4f3366c2e3386964f4dfe253ea5145c92d52873"
     },
     {
       "path": "site-source/scripts/editorial-title.mjs",
@@ -192,12 +192,16 @@
       "sha256": "1110ebf5c7922ff38eb8cfd9be12e185962c0af32b3e460d2a2cc29845edc21f"
     },
     {
+      "path": "site-source/scripts/publication.test.mjs",
+      "sha256": "50ec3ded2ddf353e5076f431941b23802cc3890e1379003adc86baca8628a559"
+    },
+    {
       "path": "site-source/scripts/validate-catalog-ledger.mjs",
       "sha256": "264cef299f08f219aabe75885109c2b5933174ec34f2ac1c70b62d2b663cfd47"
     },
     {
       "path": "site-source/scripts/validate-market.mjs",
-      "sha256": "85c82b42b13f2d98a1a301f06b73908ceac2f8b1747ecb75b792dac360715e2e"
+      "sha256": "1fd3796a7bbc9dfca028b645c88a2b31771f365f953a0ddf8c63b762419a4c34"
     },
     {
       "path": "site-source/scripts/validate-release-readiness.mjs",
@@ -213,7 +217,7 @@
     },
     {
       "path": "site-source/scripts/validate-worker.mjs",
-      "sha256": "78c2e30d139999b72c15865d5f8c75b25ac58c07877ea2df050f628eb81ca611"
+      "sha256": "68539c0dcf3a17992ed8a20ce7a5b9a4cad42c27b8391729052b9da24c4335f9"
     },
     {
       "path": "site-source/sitemap.xml",

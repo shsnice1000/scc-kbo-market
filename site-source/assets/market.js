@@ -56,7 +56,7 @@ function safeExternalHref(value) {
 
 function recordsFor(card) {
   const globalRecords = marketData.observations.filter((record) => record.cardId === card.id);
-  return sortRecordsNewestFirst([...globalRecords, ...(card.observations || [])]);
+  return sortRecordsNewestFirst(globalRecords);
 }
 
 function allCards() {
@@ -70,7 +70,7 @@ function findCard(cardId) {
 }
 
 function allRecords() {
-  return [...marketData.observations, ...marketData.candidates.flatMap((card) => card.observations || [])];
+  return [...marketData.observations];
 }
 
 function typeClass(type) {
