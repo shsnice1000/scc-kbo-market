@@ -1,0 +1,21 @@
+name: 오류 신고
+description: 합성 자료로 재현할 수 있는 코드 오류
+title: "[Bug] "
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 기대 동작과 실제 동작
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 재현 단계와 합성 입력
+      description: 실제 토큰·연락처·보유 카드·판매 자료를 넣지 마세요.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Node 버전·운영체제·커밋

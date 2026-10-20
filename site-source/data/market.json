@@ -1,0 +1,25 @@
+{
+  "edition": "2026 SCC SENSATION · 합성 개발 예시",
+  "status": "협업 개발용",
+  "observations": [],
+  "sources": [
+    {"id":"bunjang","name":"번개장터","kind":"중고거래","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://m.bunjang.co.kr/"},
+    {"id":"break","name":"BREAK","kind":"경매 · 싱글","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://break.co.kr/"},
+    {"id":"wyyyes","name":"WYYYES","kind":"라이브 · 브레이크","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://wyyyes.com/"},
+    {"id":"community","name":"전문 수집가 카페","kind":"직거래 · 교환","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://cafe.naver.com/"},
+    {"id":"kream","name":"크림(KREAM)","kind":"리셀","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://kream.co.kr/"},
+    {"id":"daewon","name":"대원샵","kind":"공식 판매","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://www.daewonshop.com/"}
+  ],
+  "officialCatalog": {"status":"awaiting_official_checklist","sourceUrl":null,"verifiedAt":null,"cards":[]},
+  "candidates": [{
+    "id":"2026-scc-jungsu-bin-chrome",
+    "player":"합성 테스트 선수",
+    "team":"구단 확인 전",
+    "type":"미분류",
+    "cardNumber":null,
+    "variant":"합성 테스트용 · 실제 카드와 매물이 아닙니다",
+    "serial":null,
+    "identityStatus":"테스트 호환용 ID이며 실제 선수·실물·재고를 나타내지 않습니다.",
+    "observations":[]
+  }]
+}

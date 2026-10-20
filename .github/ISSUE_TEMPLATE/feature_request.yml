@@ -1,0 +1,16 @@
+name: 개발 과제
+description: 기존 카드 비교 흐름의 개선 제안
+title: "[Task] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 해결할 문제와 사용자 동작
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 완료 기준과 검증 방법
+    validations:
+      required: true

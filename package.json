@@ -1,0 +1,17 @@
+{
+  "name": "scc-kbo-market-collaboration",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SCC KBO Market development workspace with synthetic data",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "setup": "node scripts/dev-setup.mjs",
+    "test": "node --test scripts/market-ops/market-ops.test.mjs scripts/market-ops/identity.test.mjs",
+    "build": "node scripts/dev-setup.mjs && node site-source/scripts/build-worker.mjs",
+    "check": "node scripts/dev-check.mjs",
+    "dev": "node scripts/dev-server.mjs",
+    "check:public": "node scripts/public-preflight.mjs",
+    "check:release": "node site-source/scripts/validate-release-readiness.mjs"
+  }
+}
