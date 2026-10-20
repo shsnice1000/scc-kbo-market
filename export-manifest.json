@@ -36,8 +36,20 @@
       "sha256": "5097eb49b2da533e29c746b6fd7100f475e60772eaf2727a7c7c28b75461d6a3"
     },
     {
+      "path": "README.md",
+      "sha256": "b3d8c2b3a50ac246c2eb229a6725e9fffb1272da20c678f1eb9341c638caba69"
+    },
+    {
+      "path": "SECURITY.md",
+      "sha256": "e036382691171735d037bb150997ea53fa14789a19e54cbdede404486c031b76"
+    },
+    {
       "path": "docs/DEVELOPMENT.md",
       "sha256": "75322a7bb840ab28d99e354370595606f04b83164cb5ce3ca87d03a53050be26"
+    },
+    {
+      "path": "docs/HANDOFF.md",
+      "sha256": "54a5951828a23e1e3fc7f148bde53e6e7efbf67b1798283335279f80e5144329"
     },
     {
       "path": "docs/KNOWN_LIMITATIONS.md",
@@ -46,10 +58,6 @@
     {
       "path": "package.json",
       "sha256": "9e1cd93ebe604b1751c3e8b752a33fe72fdc3b0963e4e512a2dc15f9c9b2e617"
-    },
-    {
-      "path": "README.md",
-      "sha256": "3b59715f4c019ab51f9316cece59f4854d75524579773d2940b1a01ffd358646"
     },
     {
       "path": "scripts/dev-check.mjs",
@@ -136,10 +144,6 @@
       "sha256": "3406275311e39ca69fdd2e7ed28c4dfc70d1027a5abfc8f841984f09fbcc49a8"
     },
     {
-      "path": "SECURITY.md",
-      "sha256": "e036382691171735d037bb150997ea53fa14789a19e54cbdede404486c031b76"
-    },
-    {
       "path": "site-source/.openai/hosting.example.json",
       "sha256": "6f3799ed894f8a0f0ffb42cd323f9480a72eb06a0a65bc82793f34713b29eaba"
     },
@@ -215,5 +219,6 @@
       "path": "site-source/sitemap.xml",
       "sha256": "8e37622e02c8959eec31f2e5052c8f36eefd736ab24f9b1a2933f91acbfe9308"
     }
-  ]
+  ],
+  "manifestUpdatedAt": "2026-10-20T22:48:35Z"
 }
