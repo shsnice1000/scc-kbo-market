@@ -32,10 +32,11 @@ export function evaluateReleaseEvidence(market, ops, { now = Date.now(), pending
   }
   const twoSourceCards = new Map();
   for (const row of market?.observations ?? []) {
-    if (row.kind !== "asking" || row.matchLevel !== "exact" || !row.cardId || !TARGET_SOURCES.includes(row.sourceId) || !["active_asking", "active_at_check"].includes(row.state)) continue;
-    const sources = twoSourceCards.get(row.cardId) ?? new Map();
+    if (row.kind !== "asking" || row.matchLevel !== "exact" || !row.cardId || !/^[a-f0-9]{64}$/.test(row.comparisonKey ?? "") || !TARGET_SOURCES.includes(row.sourceId) || !["active_asking", "active_at_check"].includes(row.state)) continue;
+    const identityGroup = row.cardId + ":" + row.comparisonKey;
+    const sources = twoSourceCards.get(identityGroup) ?? new Map();
     sources.set(row.sourceId, [...(sources.get(row.sourceId) ?? []), row]);
-    twoSourceCards.set(row.cardId, sources);
+    twoSourceCards.set(identityGroup, sources);
   }
   const groups = [...twoSourceCards.values()].filter((sources) => sources.size >= 2);
   const freshComparableCards = groups.filter((sources) => [...sources.values()].filter((rows) => rows.some((row) => fresh(row.checkedAt))).length >= 2).length;
@@ -45,7 +46,7 @@ export function evaluateReleaseEvidence(market, ops, { now = Date.now(), pending
   const missing = TARGET_SOURCES.filter((id) => !publicSources.has(id));
   if (missing.length) blockers.push("public source status cards missing " + missing.join(", "));
   if (scheduledTwice.length < TARGET_SOURCES.length) blockers.push("two distinct successful scheduled refreshes within seven days per platform have not been recorded");
-  if (!freshComparableCards) blockers.push("no fresh exact same-card asking-price comparison across two target platforms within seven days");
+  if (!freshComparableCards) blockers.push("no fresh exact same-card, same-copy-condition asking-price comparison across two target platforms within seven days");
   if (market?.officialCatalog?.status !== "verified" || !market.officialCatalog.cards?.length) blockers.push("official verified card checklist is empty");
   if (pendingImport) blockers.push("an active or interrupted public import must finish or be recovered");
   return { connected, scheduled: Object.fromEntries(scheduled), scheduledTwice, comparableCards: groups.length, freshComparableCards, publicSourceCount: TARGET_SOURCES.filter((id) => publicSources.has(id)).length, blockers };

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { editorialTitleFor } from "./editorial-title.mjs";
 import { validateReviewLedger } from "./validate-review-ledger.mjs";
 import { validateCatalogReviewLedger } from "./validate-catalog-ledger.mjs";
+import { validatePublicCardIdentity } from "./publication-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -21,6 +22,7 @@ const REQUIRED_MARKET_SOURCES = ["bunjang", "break", "wyyyes", "community", "kre
 const OBS_FIELDS = new Set([
   "id", "cardId", "kind", "state", "matchLevel", "sourceId", "title", "price", "shippingPrice",
   "checkedAt", "url", "matchNote", "postedTimeAtCheck",
+  "comparisonKey",
 ]);
 const STRING_LIMITS = {
   id: 150, cardId: 120, kind: 40, state: 60, matchLevel: 20, sourceId: 40,
@@ -29,7 +31,7 @@ const STRING_LIMITS = {
 const DATE = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))?$/;
 const PII = /(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:\+?82[- .]?)?0?1[016789][-. ]?\d{3,4}[- .]?\d{4}|계좌번호|전화번호|휴대폰|연락처|오픈채팅|카카오톡\s*(?:ID|아이디))/i;
 const ROOT_FIELDS = new Set(["edition", "status", "candidates", "sources", "observations", "officialCatalog"]);
-const CARD_FIELDS = new Set(["id", "player", "team", "type", "cardNumber", "variant", "serial"]);
+const CARD_FIELDS = new Set(["id", "player", "team", "type", "cardNumber", "variant", "serial", "printingIdentity"]);
 const CANDIDATE_FIELDS = new Set([...CARD_FIELDS, "identityStatus", "observations", "photoSources"]);
 
 function publicDate(value, now) {
@@ -111,6 +113,9 @@ export function validateMarket(data, label = "market.json", { now = Date.now(), 
     if (card.identityStatus != null && (typeof card.identityStatus !== "string" || card.identityStatus.length > 1000)) fail("card " + card.id + " has invalid identityStatus");
     if (Object.hasOwn(card, "observations") && (!Array.isArray(card.observations) || card.observations.length)) fail("card " + card.id + " nested observations must stay empty; use the reviewed global observations array");
     for (const value of Object.values(card)) if (typeof value === "string" && PII.test(value)) fail("card " + card.id + " appears to contain personal contact information");
+    if (card.printingIdentity != null) {
+      try { validatePublicCardIdentity(card); } catch (error) { fail("card " + card.id + ": " + error.message); }
+    }
   }
 
   for (const source of data.sources) {
@@ -149,6 +154,8 @@ export function validateMarket(data, label = "market.json", { now = Date.now(), 
     if (!kinds.has(row.kind)) fail("observation " + row.id + " has unknown kind");
     if (!states.has(row.state)) fail("observation " + row.id + " has unknown state");
     if (!matches.has(row.matchLevel)) fail("observation " + row.id + " has unknown matchLevel");
+    if (row.matchLevel === "exact" && !/^[a-f0-9]{64}$/.test(row.comparisonKey ?? "")) fail("exact observation " + row.id + " requires a verified comparisonKey");
+    if (row.matchLevel !== "exact" && row.comparisonKey != null) fail("unconfirmed observation " + row.id + " cannot carry a comparisonKey");
     if (!publicDate(row.checkedAt, now)) fail("observation " + row.id + " has invalid or future checkedAt");
     if (typeof row.title !== "string" || !row.title.trim()) fail("observation " + row.id + " needs a title");
     try {

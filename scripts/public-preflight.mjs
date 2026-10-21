@@ -30,7 +30,9 @@ else {
   for (const entry of manifest.files) {
     if (typeof entry.path !== "string" || !files.includes(entry.path) || entry.path === "export-manifest.json" || listed.has(entry.path)) { errors.push("Unexpected or duplicate manifest path"); continue; }
     listed.add(entry.path);
-    const digest = createHash("sha256").update(readFileSync(path.join(root, entry.path))).digest("hex");
+    const bytes = readFileSync(path.join(root, entry.path));
+    const canonical = entry.path === "site-source/assets/og-preview.png" ? bytes : Buffer.from(bytes.toString("utf8").replaceAll("\r\n", "\n"), "utf8");
+    const digest = createHash("sha256").update(canonical).digest("hex");
     if (digest !== entry.sha256) errors.push(`Export manifest content changed without review: ${entry.path}`);
   }
   for (const file of files) if (file !== "export-manifest.json" && !listed.has(file)) errors.push(`Public file missing from export manifest: ${file}`);

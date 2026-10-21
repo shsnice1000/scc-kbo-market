@@ -2,10 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BASES, METHODS, PII, evidenceRef, validDate, noLaterThan, methodBasisAllowed, publicRowSha256 } from "./review-policy.mjs";
+import { publicationComparison } from "./publication-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TOP_FIELDS = new Set(["formatVersion", "snapshotSha256", "reviewedAt", "reviewer", "publicationBasis", "publicationEvidenceRef", "noPersonalData", "records"]);
-const RECORD_FIELDS = new Set(["observationId", "sourceId", "publicRowSha256", "publicCardSha256", "captureMethod", "termsReviewedAt", "observedAt", "sourcePublishedAt", "settlementEvidenceRef", "settlementEvidenceType"]);
+const RECORD_FIELDS = new Set(["observationId", "sourceId", "publicRowSha256", "publicCardSha256", "captureMethod", "termsReviewedAt", "observedAt", "sourcePublishedAt", "settlementEvidenceRef", "settlementEvidenceType", "inventoryOrigin", "identityReview", "identityEvidenceRef", "comparisonGroupId"]);
 
 // Pending records go through exactly the same checks as records already on disk.
 export function validateReviewLedger(data, siteRoot = root, { now = Date.now(), pendingRecords = [] } = {}) {
@@ -60,6 +61,10 @@ export function validateReviewLedger(data, siteRoot = root, { now = Date.now(), 
         if (row.sourceId !== record.sourceId || publicRowSha256(row) !== record.publicRowSha256) fail("approved public row changed (price, source, identity, URL, or state); review again");
         const cardHash = cards.has(row.cardId) ? publicRowSha256(cards.get(row.cardId)) : null;
         if (record.publicCardSha256 !== cardHash) fail("approved public card metadata changed; review the observation mapping again");
+        try {
+          const key = publicationComparison(row, cards.get(row.cardId), record);
+          if (key !== (row.comparisonKey ?? null)) fail("public comparison key conflicts with private identity review");
+        } catch (error) { fail(error.message); }
         if (!noLaterThan(row.checkedAt, item.reviewedAt) || !noLaterThan(record.observedAt, row.checkedAt)) fail("observation/check/review chronology is invalid");
         if (["sold", "sold_verified"].includes(row.kind)) {
           if (!["authorized_api", "seller_submitted"].includes(record.captureMethod) || !evidenceRef(record.settlementEvidenceRef) || !["completed_order", "payment_settlement"].includes(record.settlementEvidenceType)) fail("verified sale requires private completed-order or settlement evidence; listing badges are insufficient");

@@ -19,7 +19,7 @@ market.candidates = [{ id: "synthetic-card", player: "Synthetic Player", team: "
 function snapshot() {
   return {
     review: { reviewer: "publication-reviewer", reviewedAt: "2026-10-20T22:00:00Z", publicationBasis: "written_permission", publicationEvidenceRef: "permission/basis-001", noPersonalData: true },
-    observations: [{ id: "synthetic-ask-001", cardId: "synthetic-card", kind: "asking", state: "active_asking", matchLevel: "candidate", sourceId: "bunjang", price: 1000, shippingPrice: null, checkedAt: "2026-10-20T21:00:00Z", url: "https://m.bunjang.co.kr/products/101", matchNote: "Synthetic validation fixture", captureMethod: "manual_public_page", termsReviewedAt: "2026-10-20", observedAt: "2026-10-20T20:00:00Z" }],
+    observations: [{ id: "synthetic-ask-001", cardId: "synthetic-card", kind: "asking", state: "active_asking", matchLevel: "candidate", sourceId: "bunjang", price: 1000, shippingPrice: null, checkedAt: "2026-10-20T21:00:00Z", url: "https://m.bunjang.co.kr/products/101", matchNote: "Synthetic validation fixture", captureMethod: "manual_public_page", termsReviewedAt: "2026-10-20", observedAt: "2026-10-20T20:00:00Z", inventoryOrigin: "independent_market" }],
   };
 }
 
@@ -72,6 +72,8 @@ test("review rejects legacy approvals, future dates, placeholder references, and
     (input) => { input.observations[0].sourcePublishedAt = "2026-10-21T01:00:00Z"; },
     (input) => { Object.assign(input.observations[0], { kind: "sold_verified", state: "sold_verified" }); },
     (input) => { input.observations[0].captureMethod = "authorized_api"; },
+    (input) => { input.observations[0].inventoryOrigin = "owner_held"; },
+    (input) => { input.observations[0].matchLevel = "exact"; },
   ]) {
     const input = snapshot(); alter(input);
     assert.throws(() => prepareReviewedSnapshot(input, market, { siteRoot: dir, now }));

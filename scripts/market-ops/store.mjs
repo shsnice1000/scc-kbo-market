@@ -288,6 +288,7 @@ export function applySnapshot(db, snapshot, runId, now = new Date(), reviewOrdin
       state: row.state,
       matchLevel: row.matchLevel,
       matchNote: row.matchNote,
+      reviewLedgerId: ledgerId,
       price: row.price,
       shippingPrice: row.shippingPrice,
       ...(row.settlementEvidenceRef ? { settlementEvidenceRef: row.settlementEvidenceRef } : {}),

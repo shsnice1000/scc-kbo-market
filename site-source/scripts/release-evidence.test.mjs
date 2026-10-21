@@ -6,7 +6,7 @@ const now = Date.parse("2026-10-21T00:00:00Z");
 function fixture() {
   const runs = ["2026-10-19T00:00:00Z", "2026-10-20T00:00:00Z"].map((time, index) => ({ id: "scheduled-" + index, trigger: "scheduled_approved_collectors", startedAt: time, finishedAt: time, sources: TARGET_SOURCES.map((id) => ({ sourceId: id, state: "collector_updated" })) }));
   return {
-    market: { sources: TARGET_SOURCES.map((id) => ({ id })), officialCatalog: { status: "verified", cards: [{ id: "synthetic-card" }] }, observations: ["bunjang", "break"].map((sourceId) => ({ cardId: "synthetic-card", kind: "asking", matchLevel: "exact", state: "active_asking", sourceId, checkedAt: "2026-10-20T00:00:00Z" })) },
+    market: { sources: TARGET_SOURCES.map((id) => ({ id })), officialCatalog: { status: "verified", cards: [{ id: "synthetic-card" }] }, observations: ["bunjang", "break"].map((sourceId) => ({ cardId: "synthetic-card", kind: "asking", matchLevel: "exact", comparisonKey: "a".repeat(64), state: "active_asking", sourceId, checkedAt: "2026-10-20T00:00:00Z" })) },
     ops: { runs, sourceStatus: Object.fromEntries(TARGET_SOURCES.map((id) => [id, { state: "collector_updated", collectorConnected: true, lastCollectorSuccessAt: "2026-10-20T00:00:00Z" }])) },
   };
 }
@@ -36,4 +36,13 @@ test("historical successes cannot conceal failed current collectors, stale data,
   assert.ok(evaluateReleaseEvidence(stale, ops, { now }).blockers.some((reason) => reason.includes("same-card")));
   assert.ok(evaluateReleaseEvidence(market, ops, { now, pendingImport: true }).blockers.some((reason) => reason.includes("interrupted")));
   assert.equal(evaluateReleaseEvidence({ sources: [], observations: [] }, null, { now }).connected.length, 0);
+});
+
+test("same card catalog ID with different serial, grade, or condition keys is not a cross-platform comparison", () => {
+  const { market, ops } = fixture();
+  market.observations[1].comparisonKey = "b".repeat(64);
+  const result = evaluateReleaseEvidence(market, ops, { now });
+  assert.equal(result.comparableCards, 0);
+  assert.equal(result.freshComparableCards, 0);
+  assert.ok(result.blockers.some((reason) => reason.includes("same-copy-condition")));
 });

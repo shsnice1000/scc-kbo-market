@@ -99,6 +99,22 @@ function summarizeObservedPrices(records) {
   return minimum === maximum ? formatPrice(minimum) : formatPrice(minimum) + "–" + formatPrice(maximum);
 }
 
+function groupExactComparisons(records) {
+  const groups = new Map();
+  records.forEach((record, index) => {
+    if (record.matchLevel !== "exact") return;
+    const verified = /^[a-f0-9]{64}$/.test(record.comparisonKey || "");
+    const key = verified ? record.comparisonKey : "unverified:" + (record.id || index);
+    const group = groups.get(key) || { key, verified, records: [] };
+    group.records.push(record);
+    groups.set(key, group);
+  });
+  return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key)).map((group, index) => ({
+    ...group,
+    label: group.verified ? "동일 실물 조건 " + (index + 1) : "비교 조건 미확인 " + (index + 1),
+  }));
+}
+
 function latestObservedDate(records) {
   return sortRecordsNewestFirst(records).find((record) => Number.isFinite(observationTimestamp(record.checkedAt)))?.checkedAt || "날짜 미기록";
 }
@@ -161,6 +177,12 @@ function priceEvidenceLine(label, records, note) {
   if (!records.length) return "";
   const checked = latestObservedDate(records);
   return "<div class=\"card-price-line\"><span class=\"card-price-label\">" + label + " <b>" + records.length + "건</b></span><strong class=\"card-price-value\">" + summarizeObservedPrices(records) + "</strong><span class=\"card-price-note\">" + note + " · 상품가 기준, 배송비 별도 · " + escapeHTML(observationAgeLabel(checked)) + "</span></div>";
+}
+
+function candidateEvidenceLine(label, records, note) {
+  if (!records.length) return "";
+  const checked = latestObservedDate(records);
+  return "<div class=\"card-price-line\"><span class=\"card-price-label\">" + label + " <b>" + records.length + "건</b></span><strong class=\"card-price-value\">개별 기록</strong><span class=\"card-price-note\">" + note + " · 후보 기록끼리는 가격 범위를 계산하지 않습니다 · " + escapeHTML(observationAgeLabel(checked)) + "</span></div>";
 }
 
 function renderFilterOptions() {
@@ -294,13 +316,17 @@ function cardMarkup(card) {
   const favorite = favorites.has(card.id);
   const candidateAsks = records.filter((record) => activeAsk(record) && record.matchLevel === "candidate");
   const exactAsks = records.filter((record) => activeAsk(record) && record.matchLevel === "exact");
+  const exactAskGroups = groupExactComparisons(exactAsks);
   const exactSold = records.filter((record) => matchesKind(record, "sold_verified") && record.matchLevel === "exact");
+  const exactSoldGroups = groupExactComparisons(exactSold);
   const candidateSold = records.filter((record) => matchesKind(record, "sold_verified") && record.matchLevel === "candidate");
   const priceEvidence = [
-    priceEvidenceLine("카드 후보 매물", candidateAsks, "번호·패럴렐 확인 전 · 판매 완료 아님"),
-    priceEvidenceLine("정보 일치 매물", exactAsks, "판매 희망가 · 판매 완료 아님"),
-    priceEvidenceLine("확인된 실거래가", exactSold, "실제 판매와 카드 식별 확인"),
-    priceEvidenceLine("실거래 확인 · 카드 후보", candidateSold, "정산 근거 확인 · 같은 카드인지 확인 전")
+    candidateEvidenceLine("카드 후보 매물", candidateAsks, "번호·패럴렐 확인 전 · 판매 완료 아님"),
+    ...exactAskGroups.slice(0, 4).map((group) => priceEvidenceLine(group.label + " 희망가", group.records, "판매 희망가 · 판매 완료 아님")),
+    exactAskGroups.length > 4 ? `<p class="card-price-note">추가 실물 비교 조건 ${exactAskGroups.length - 4}개는 상세 보기에서 확인할 수 있습니다.</p>` : "",
+    ...exactSoldGroups.slice(0, 4).map((group) => priceEvidenceLine(group.label + " 확인된 실거래가", group.records, "실제 판매와 카드 식별 확인")),
+    exactSoldGroups.length > 4 ? `<p class="card-price-note">추가 실물 조건의 실거래는 상세 보기에서 확인할 수 있습니다.</p>` : "",
+    candidateEvidenceLine("실거래 확인 · 카드 후보", candidateSold, "정산 근거 확인 · 같은 카드인지 확인 전")
   ].filter(Boolean).join("") || `<p class="card-price-empty">아직 공개한 가격 기록이 없습니다. 출처와 카드 정보를 확인한 뒤 추가합니다.</p>`;
 
   return `<article class="card-item">
@@ -381,10 +407,11 @@ function niceChartMaximum(value) {
   return step * power;
 }
 
-function platformComparisonMarkup(records, activeKind = "asking", activeSource = "all") {
+function platformComparisonMarkup(records, activeKind = "asking", activeSource = "all", activeComparison = "all") {
   const kindLabel = PRICE_LABELS[activeKind] || "가격 기록";
   const included = records.filter((record) => matchesKind(record, activeKind)
     && record.matchLevel !== "generic"
+    && (activeComparison === "all" || (record.matchLevel === "exact" && record.comparisonKey === activeComparison))
     && !["unavailable_on_recheck", "sold_badge_sale_price_unverified", "sold_badge_only"].includes(record.state)
     && Number.isFinite(record.price));
   const maximum = niceChartMaximum(Math.max(...included.map((record) => record.price), 0) * 1.08);
@@ -416,13 +443,18 @@ function platformComparisonMarkup(records, activeKind = "asking", activeSource =
   return `<section class="platform-comparison" aria-labelledby="platform-comparison-title"><div class="platform-comparison-title"><div><span class="section-kicker">${escapeHTML(kindLabel)}</span><h3 id="platform-comparison-title">플랫폼별 가격 기록</h3></div><p>각 점은 확인 당시 ${escapeHTML(kindLabel)}입니다. 상품가 기준이며 배송비가 확인되지 않은 기록도 포함됩니다. ${escapeHTML(legend)}</p></div><div class="price-plot-axis-title"><span>낮은 가격</span><span>높은 가격</span></div><div class="price-plot-list">${rows}</div><p class="price-plot-footnote">가격 기록이 없는 플랫폼은 이번 조사에서 확인하지 못한 상태입니다. 매물이 없다는 뜻은 아니며, 현재 판매 여부는 원문에서 확인하세요.</p></section>`;
 }
 
-function renderDialog(card, activeTab = "asking", activeSource = "all", restoreControl = null) {
+function renderDialog(card, activeTab = "asking", activeSource = "all", restoreControl = null, activeComparison = null) {
   const dialogScrollTop = ui.dialog.scrollTop;
   const records = recordsFor(card);
   const cardTitle = card.player + (card.cardNumber ? " " + card.cardNumber : "");
   const tabLabels = PRICE_LABELS;
   const sourceRecords = activeSource === "all" ? records : records.filter((record) => record.sourceId === activeSource);
   const filtered = sourceRecords.filter((record) => matchesKind(record, activeTab));
+  const comparisonGroups = groupExactComparisons(filtered);
+  const selectedComparison = activeComparison === "all" ? "all"
+    : activeComparison && comparisonGroups.some((group) => group.key === activeComparison)
+      ? activeComparison
+      : comparisonGroups[0]?.key || "all";
   const rows = filtered.length
     ? filtered.map(recordRow).join("")
     : "<div class=\"record-empty\"><strong>" + PRICE_LABELS[activeTab] + " 기록이 아직 없어요.</strong>이 출처에 매물이 없다는 뜻은 아닙니다.</div>";
@@ -437,6 +469,12 @@ function renderDialog(card, activeTab = "asking", activeSource = "all", restoreC
     const amount = source.id === "all" ? records.length : records.filter((record) => record.sourceId === source.id).length;
     return "<button class=\"source-filter\" type=\"button\" data-source-filter=\"" + escapeHTML(source.id) + "\" aria-pressed=\"" + (source.id === activeSource) + "\">" + escapeHTML(source.name) + " <span>" + amount + "</span></button>";
   }).join("");
+  const comparisonFilters = comparisonGroups.length
+    ? [{ key: "all", label: "전체 조건 · 가격 범위 미계산" }, ...comparisonGroups].map((group, index) => {
+      const value = index === 0 ? "all" : String(index - 1);
+      return "<button class=\"source-filter\" type=\"button\" data-comparison-filter=\"" + value + "\" aria-pressed=\"" + (group.key === selectedComparison) + "\">" + escapeHTML(group.label) + "</button>";
+    }).join("")
+    : "";
   const searchLink = "https://m.bunjang.co.kr/keywords/" + encodeURIComponent("2026 SCC " + card.player);
   const askingRecord = records.find((record) => record.kind === "asking" && record.matchLevel === "exact" && record.url)
     || records.find((record) => record.kind === "asking" && record.matchLevel === "candidate" && record.url);
@@ -449,7 +487,9 @@ function renderDialog(card, activeTab = "asking", activeSource = "all", restoreC
   const evidenceViews = records.length
     ? "<div class=\"source-filters\" role=\"group\" aria-label=\"플랫폼별 기록 필터\">" + sourceFilters + "</div>"
       + "<div class=\"record-tabs\" role=\"group\" aria-label=\"가격 유형별 기록\">" + tabs + "</div>"
-      + platformComparisonMarkup(records, activeTab, activeSource)
+      + (comparisonFilters ? "<div class=\"source-filters comparison-filters\" role=\"group\" aria-label=\"실물 비교 조건별 기록\">" + comparisonFilters + "</div>" : "")
+      + (comparisonFilters ? "<p class=\"comparison-condition-note\">그래프에는 선택한 동일 실물 조건만 표시됩니다. 전체 조건을 고르면 기록은 함께 보이지만 서로 다른 시리얼·등급·상태의 가격 범위는 계산하지 않습니다.</p>" : "")
+      + platformComparisonMarkup(records, activeTab, activeSource, selectedComparison)
       + "<div class=\"record-list\">" + rows + "</div>"
     : "<div class=\"record-empty detail-record-empty\"><strong>이 카드와 연결된 공개 가격 기록이 없습니다.</strong><span>카드 정보와 가격 근거를 확인한 자료가 등록되면 이곳에 표시합니다. 현재 매물 여부는 원문에서 확인해 주세요.</span></div>";
   const catalogLabel = card.catalogStatus === "official" ? "정식 체크리스트" : "판매글 후보";
@@ -462,8 +502,13 @@ function renderDialog(card, activeTab = "asking", activeSource = "all", restoreC
     + "<div class=\"visually-hidden\" id=\"dialog-filter-status\" role=\"status\" aria-live=\"polite\"></div>"
     + "<p class=\"draft-confirmation\">실시간 매물 조회는 제공하지 않습니다. 현재 판매 여부와 카드 정보는 원문에서 확인해 주세요.</p>"
     + "<div class=\"dialog-actions\">" + directListing + "<a class=\"button " + (askingRecord ? "button-quiet" : "button-primary") + "\" href=\"" + escapeHTML(searchLink) + "\" target=\"_blank\" rel=\"noopener noreferrer\">번개장터에서 검색 <span aria-hidden=\"true\">↗</span></a><button class=\"button button-quiet\" type=\"button\" data-copy-card-link=\"" + escapeHTML(shareURL.href) + "\">카드 링크 복사</button></div>";
-  ui.dialogContent.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => renderDialog(card, button.dataset.tab, activeSource, { type: "tab", value: button.dataset.tab })));
-  ui.dialogContent.querySelectorAll("[data-source-filter]").forEach((button) => button.addEventListener("click", () => renderDialog(card, activeTab, button.dataset.sourceFilter, { type: "source", value: button.dataset.sourceFilter })));
+  ui.dialogContent.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => renderDialog(card, button.dataset.tab, activeSource, { type: "tab", value: button.dataset.tab }, selectedComparison)));
+  ui.dialogContent.querySelectorAll("[data-source-filter]").forEach((button) => button.addEventListener("click", () => renderDialog(card, activeTab, button.dataset.sourceFilter, { type: "source", value: button.dataset.sourceFilter }, selectedComparison)));
+  ui.dialogContent.querySelectorAll("[data-comparison-filter]").forEach((button) => button.addEventListener("click", () => {
+    const index = Number(button.dataset.comparisonFilter);
+    const comparison = button.dataset.comparisonFilter === "all" ? "all" : comparisonGroups[index]?.key;
+    if (comparison) renderDialog(card, activeTab, activeSource, { type: "comparison", value: button.dataset.comparisonFilter }, comparison);
+  }));
   ui.dialogContent.querySelector("[data-copy-card-link]").addEventListener("click", async (event) => {
     try {
       await navigator.clipboard.writeText(event.currentTarget.dataset.copyCardLink);
@@ -473,8 +518,9 @@ function renderDialog(card, activeTab = "asking", activeSource = "all", restoreC
     }
   });
   if (restoreControl) {
-    const selector = restoreControl.type === "tab" ? "[data-tab]" : "[data-source-filter]";
-    const focusTarget = [...ui.dialogContent.querySelectorAll(selector)].find((button) => button.dataset[restoreControl.type === "tab" ? "tab" : "sourceFilter"] === restoreControl.value);
+    const selector = restoreControl.type === "tab" ? "[data-tab]" : restoreControl.type === "comparison" ? "[data-comparison-filter]" : "[data-source-filter]";
+    const dataKey = restoreControl.type === "tab" ? "tab" : restoreControl.type === "comparison" ? "comparisonFilter" : "sourceFilter";
+    const focusTarget = [...ui.dialogContent.querySelectorAll(selector)].find((button) => button.dataset[dataKey] === restoreControl.value);
     focusTarget?.focus({ preventScroll: true });
     ui.dialog.scrollTop = dialogScrollTop;
     const status = ui.dialogContent.querySelector("#dialog-filter-status");

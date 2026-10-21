@@ -7,6 +7,7 @@ import { normalizeIdentityV2, reviewIdentityCaseV2 } from "./identity.mjs";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,159}$/;
+const COMPARISON_GROUP_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function reference(value, label) {
   if (typeof value !== "string" || !REF.test(value) || CONTACT_INFO.test(value) || /REPLACE|PLACEHOLDER/i.test(value)) throw new Error(`${label} must be a non-identifying private evidence reference`);
@@ -73,9 +74,10 @@ export function upsertReviewCase(queue, raw, now = new Date()) {
   return { changed: true, entry };
 }
 
-export function recordMatchDecision(queue, caseId, decision, evidenceRef, now = new Date()) {
+export function recordMatchDecision(queue, caseId, decision, evidenceRef, now = new Date(), requestedComparisonGroupId = null) {
   if (!["approve", "defer", "reject"].includes(decision)) throw new Error("review decision must be approve, defer or reject");
   reference(evidenceRef, "review evidence");
+  if (requestedComparisonGroupId != null && (decision !== "approve" || typeof requestedComparisonGroupId !== "string" || !COMPARISON_GROUP_ID.test(requestedComparisonGroupId))) throw new Error("comparison group ID must be a UUID supplied only with approval");
   const entry = queue.entries.find((row) => row.caseId === caseId);
   if (!entry) throw new Error("review case was not found");
   const normalized = normalizeQueueInput(entry.input);
@@ -84,13 +86,14 @@ export function recordMatchDecision(queue, caseId, decision, evidenceRef, now = 
   if (decision === "approve" && proposal.decision !== "exact_identity") throw new Error("only complete, non-conflicting single-card identities may be approved");
   const at = now.toISOString();
   const status = { approve: "approved", defer: "deferred", reject: "rejected" }[decision];
-  if (entry.status === status && entry.review?.evidenceRef === evidenceRef && entry.review?.contentSha256 === entry.contentSha256) return { changed: false, entry };
+  const comparisonGroupId = decision === "approve" ? requestedComparisonGroupId?.toLowerCase() ?? entry.review?.comparisonGroupId?.toLowerCase() ?? randomUUID() : null;
+  if (entry.status === status && entry.review?.evidenceRef === evidenceRef && entry.review?.contentSha256 === entry.contentSha256 && (decision !== "approve" || entry.review?.comparisonGroupId === comparisonGroupId)) return { changed: false, entry };
   entry.proposal = proposal;
   entry.status = status;
-  entry.review = { decision, evidenceRef, reviewedAt: at, contentSha256: entry.contentSha256, publicPublicationAllowed: false };
+  entry.review = { decision, evidenceRef, reviewedAt: at, contentSha256: entry.contentSha256, publicPublicationAllowed: false, comparisonGroupId };
   entry.updatedAt = at;
   queue.updatedAt = at;
-  queue.events.push({ id: randomUUID(), at, caseId, action: `review_${decision}`, contentSha256: entry.contentSha256, evidenceRef });
+  queue.events.push({ id: randomUUID(), at, caseId, action: `review_${decision}`, contentSha256: entry.contentSha256, evidenceRef, comparisonGroupId });
   return { changed: true, entry };
 }
 
@@ -98,7 +101,7 @@ export function summarizeReviewQueue(queue) {
   return {
     schemaVersion: 1, updatedAt: queue.updatedAt, publicPublicationAllowed: false,
     counts: Object.fromEntries(["pending", "approved", "deferred", "rejected"].map((state) => [state, queue.entries.filter((entry) => entry.status === state).length])),
-    cases: queue.entries.map((entry) => ({ caseId: entry.caseId, sourceId: entry.input.sourceId, status: entry.status, revision: entry.revision, decision: entry.proposal.decision, identityComparable: entry.proposal.identityComparable, missingFields: entry.proposal.missingFields, conflicts: entry.proposal.conflicts, comparisonBlockers: entry.proposal.comparisonBlockers })),
+    cases: queue.entries.map((entry) => ({ caseId: entry.caseId, sourceId: entry.input.sourceId, status: entry.status, revision: entry.revision, decision: entry.proposal.decision, identityComparable: entry.proposal.identityComparable, comparisonGroupId: entry.review?.comparisonGroupId ?? null, missingFields: entry.proposal.missingFields, conflicts: entry.proposal.conflicts, comparisonBlockers: entry.proposal.comparisonBlockers })),
   };
 }
 
@@ -112,7 +115,7 @@ function assertQueue(queue) {
     ids.add(entry.caseId);
     if (entry.contentSha256 !== contentHash(input)) throw new Error("review queue content hash is invalid");
     if (!["pending", "approved", "deferred", "rejected"].includes(entry.status)) throw new Error("review queue status is invalid");
-    if (entry.status === "approved" && (entry.review?.contentSha256 !== entry.contentSha256 || entry.review?.publicPublicationAllowed !== false || reviewIdentityCaseV2(input.matchCase).decision !== "exact_identity")) throw new Error("review approval is stale or invalid");
+    if (entry.status === "approved" && (entry.review?.contentSha256 !== entry.contentSha256 || entry.review?.publicPublicationAllowed !== false || (entry.review.comparisonGroupId != null && !COMPARISON_GROUP_ID.test(entry.review.comparisonGroupId)) || reviewIdentityCaseV2(input.matchCase).decision !== "exact_identity")) throw new Error("review approval is stale or invalid");
   }
   return queue;
 }

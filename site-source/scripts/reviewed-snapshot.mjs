@@ -6,10 +6,11 @@ import { spawnSync } from "node:child_process";
 import { editorialTitleFor } from "./editorial-title.mjs";
 import { validateMarket } from "./validate-market.mjs";
 import { validateStaticDist } from "./validate-static-dist.mjs";
+import { publicationComparison } from "./publication-identity.mjs";
 
 const ENVELOPE = new Set(["review", "observations"]);
 const REVIEW = new Set(["reviewer", "reviewedAt", "publicationBasis", "publicationEvidenceRef", "noPersonalData"]);
-const AUDIT = ["captureMethod", "termsReviewedAt", "observedAt", "sourcePublishedAt", "settlementEvidenceRef", "settlementEvidenceType"];
+const AUDIT = ["captureMethod", "termsReviewedAt", "observedAt", "sourcePublishedAt", "settlementEvidenceRef", "settlementEvidenceType", "inventoryOrigin", "identityReview", "identityEvidenceRef", "comparisonGroupId"];
 const RECORD = new Set(["id", "cardId", "kind", "state", "matchLevel", "sourceId", "price", "shippingPrice", "checkedAt", "url", "matchNote", "postedTimeAtCheck", ...AUDIT]);
 const PUBLIC_FILES = ["data/market.json", "dist/data/market.json", "worker/index.js", "dist/server/index.js"];
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -34,6 +35,8 @@ export function prepareReviewedSnapshot(input, market, { siteRoot, inputSha256 =
     ids.add(row.id);
     const publicRow = { ...row, title: editorialTitleFor(row, cards) };
     for (const key of AUDIT) delete publicRow[key];
+    const comparisonKey = publicationComparison(publicRow, cards.get(row.cardId), row);
+    if (comparisonKey) publicRow.comparisonKey = comparisonKey;
     prospective.observations.push(publicRow);
     auditRows.push({ observationId: row.id, sourceId: row.sourceId, publicRowSha256: publicRowSha256(publicRow), publicCardSha256: cards.has(row.cardId) ? publicRowSha256(cards.get(row.cardId)) : null, ...Object.fromEntries(AUDIT.filter((key) => row[key] !== undefined).map((key) => [key, row[key]])) });
   }

@@ -6,7 +6,7 @@ import { SOURCE_CATALOG } from "./market-ops/catalog.mjs";
 import { runIngest, runRefresh } from "./market-ops/refresh.mjs";
 import { validateSnapshot } from "./market-ops/snapshot.mjs";
 import { buildSnapshotTemplate } from "./market-ops/snapshot-template.mjs";
-import { applyPrivateObservation, pruneExpired, retractObservation, restoreSuppressedListing, withDatabase } from "./market-ops/store.mjs";
+import { applyPrivateObservation, pruneExpired, readDatabase, retractObservation, restoreSuppressedListing, withDatabase } from "./market-ops/store.mjs";
 import { refreshExitCode } from "./market-ops/run-outcome.mjs";
 import { databaseHealth } from "./market-ops/database-health.mjs";
 import { readPrivateObservation } from "./market-ops/private-observation.mjs";
@@ -18,6 +18,7 @@ import { readReviewQueue, updateReviewQueue, upsertReviewCase, recordMatchDecisi
 import { buildSampleReadiness, formatSampleReadiness } from "./market-ops/sample-readiness.mjs";
 import { parseRefreshArgs } from "./market-ops/refresh-args.mjs";
 import { createReadStream } from "node:fs";
+import { buildPublicationDraft, createPublicationSelectionTemplate, readPublicationSelection, writePublicationDraft } from "./market-ops/publication-export.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = path.join(root, ".ops-private", "market-ops");
@@ -40,7 +41,9 @@ Usage:
   node scripts/market-ops.mjs match-review <private-match-case.json>
   node scripts/market-ops.mjs match-queue-add <private-queue-input.json>
   node scripts/market-ops.mjs match-queue-list
-  node scripts/market-ops.mjs match-queue-decide <case-id> <approve|defer|reject> <private-evidence-ref>
+  node scripts/market-ops.mjs match-queue-decide <case-id> <approve|defer|reject> <private-evidence-ref> [comparison-group-uuid]
+  node scripts/market-ops.mjs publication-export-template
+  node scripts/market-ops.mjs publication-export <.ops-private/publication-export/selection.json> [--dry-run]
   node scripts/market-ops.mjs history <source-id> <external-id>
   node scripts/market-ops.mjs private-note <private-observation.json>
   node scripts/market-ops.mjs private-template <note-id>
@@ -56,6 +59,7 @@ Normalized operation data is stored under .ops-private/market-ops/; inputs and t
 Platform templates deliberately fail review until real permission is recorded.
 The Bunjang search collector runs only when the explicit --bunjang-config option points to a private config and token provider; it makes partner API requests.
 Private notes from user-provided screenshots or manually checked public UI are stored separately from platform snapshots and are never eligible for public-site export.
+Publication export requires a separately reviewed selection, current source permission, independent-market origin, and approved exact physical-copy identity. It writes only to .ops-private/publication-export/drafts; it never updates public site files.
 No platform request is sent by default. A valid private Bunjang config and explicit --bunjang-config option enable the partner search collector for that run only.
 Use --scheduled only in the configured operating-system scheduler action; ordinary manual runs are recorded separately. This flag records the invocation source and does not create or enable a schedule.
 Multiple same-source snapshots are accepted only for a same-scope Bunjang Full/Segment catalog sequence. Processed feeds are skipped by a private watermark; a Segment gap over 24 hours requires a new Full baseline.
@@ -247,9 +251,9 @@ async function addMatchReviewQueue(inputPath) {
   console.log(JSON.stringify({ changed: result.changed, caseId: result.entry.caseId, status: result.entry.status, revision: result.entry.revision, proposal: result.entry.proposal, publicPublicationAllowed: false }, null, 2));
 }
 
-async function decideMatchReviewQueue(caseId, decision, evidenceRef) {
-  const result = await updateReviewQueue(root, (queue) => recordMatchDecision(queue, caseId, decision, evidenceRef));
-  console.log(JSON.stringify({ changed: result.changed, caseId: result.entry.caseId, status: result.entry.status, identityComparable: result.entry.proposal.identityComparable, publicPublicationAllowed: false }, null, 2));
+async function decideMatchReviewQueue(caseId, decision, evidenceRef, comparisonGroupId) {
+  const result = await updateReviewQueue(root, (queue) => recordMatchDecision(queue, caseId, decision, evidenceRef, new Date(), comparisonGroupId ?? null));
+  console.log(JSON.stringify({ changed: result.changed, caseId: result.entry.caseId, status: result.entry.status, identityComparable: result.entry.proposal.identityComparable, comparisonGroupId: result.entry.review?.comparisonGroupId ?? null, publicPublicationAllowed: false }, null, 2));
 }
 
 async function createBunjangCatalogTemplate() {
@@ -483,6 +487,18 @@ async function showPrivateHistory(noteId) {
   });
 }
 
+async function exportPublicationDraft(selectionArgument, dryRun) {
+  const selection = await readPublicationSelection(root, selectionArgument);
+  const [db, queue] = await Promise.all([readDatabase(dataDir), readReviewQueue(root)]);
+  if (!db) throw new Error("operations database has no imported public observations");
+  const siteRoot = path.join(root, "site-source");
+  const market = JSON.parse(await readFile(path.join(siteRoot, "data", "market.json"), "utf8"));
+  const draft = buildPublicationDraft({ db, queue, selection, market, siteRoot, now: Date.now() });
+  const result = await writePublicationDraft(root, draft, { dryRun });
+  if (dryRun) console.log(`DRY RUN: ${result.observationCount} eligible observation(s); private draft would be ${result.path}; sha256 ${result.sha256}`);
+  else console.log(`${result.alreadyExists ? "Existing" : "Created"} private publication draft: ${result.path} (${result.observationCount} observation(s), sha256 ${result.sha256})`);
+}
+
 async function retractPublicObservation(sourceId, externalId, reasonCode, evidenceRef) {
   const result = await withDatabase(dataDir, async (db) => retractObservation(db, sourceId, externalId, reasonCode, evidenceRef));
   if (!result.retracted) {
@@ -527,7 +543,18 @@ async function main() {
     console.log(JSON.stringify(summarizeReviewQueue(await readReviewQueue(root)), null, 2));
     return;
   }
-  if (command === "match-queue-decide" && args.length === 3) return decideMatchReviewQueue(...args);
+  if (command === "match-queue-decide" && (args.length === 3 || args.length === 4)) return decideMatchReviewQueue(...args);
+  if (command === "publication-export-template" && !args.length) {
+    const result = await createPublicationSelectionTemplate(root);
+    console.log(`${result.created ? "Created" : "Preserved existing"} private publication selection template: ${result.path}`);
+    return;
+  }
+  if (command === "publication-export") {
+    const dryRun = args.includes("--dry-run");
+    const files = args.filter((argument) => argument !== "--dry-run");
+    if (files.length !== 1) throw new Error("publication-export needs one selection JSON path and optional --dry-run");
+    return exportPublicationDraft(files[0], dryRun);
+  }
   if (command === "ingest" && args.length === 1) {
     const result = await runIngest({ dataDir, snapshotFile: path.resolve(args[0]) });
     printRun(result.run);

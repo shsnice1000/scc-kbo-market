@@ -7,7 +7,7 @@
   "engines": { "node": ">=24" },
   "scripts": {
     "setup": "node scripts/dev-setup.mjs",
-    "test": "node --test scripts/market-ops/market-ops.test.mjs scripts/market-ops/identity.test.mjs scripts/market-ops/lifecycle.test.mjs site-source/scripts/publication.test.mjs site-source/scripts/reviewed-snapshot.test.mjs site-source/scripts/release-evidence.test.mjs",
+    "test": "node --test scripts/market-ops/market-ops.test.mjs scripts/market-ops/identity.test.mjs scripts/market-ops/lifecycle.test.mjs scripts/market-ops/publication-export.test.mjs site-source/scripts/publication.test.mjs site-source/scripts/publication-identity.test.mjs site-source/scripts/reviewed-snapshot.test.mjs site-source/scripts/release-evidence.test.mjs",
     "build": "node scripts/dev-setup.mjs && node site-source/scripts/build-worker.mjs",
     "check": "node scripts/dev-check.mjs",
     "dev": "node scripts/dev-server.mjs",

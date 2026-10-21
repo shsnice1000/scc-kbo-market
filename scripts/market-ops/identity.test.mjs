@@ -88,6 +88,14 @@ test("review revisions invalidate approvals and local approval never grants publ
   assert.equal(upsertReviewCase(queue, queueInput()).changed, false);
   const approved = recordMatchDecision(queue, "synthetic-001", "approve", "synthetic:review:001");
   assert.equal(approved.entry.review.publicPublicationAllowed, false);
+  assert.match(approved.entry.review.comparisonGroupId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(recordMatchDecision(queue, "synthetic-001", "approve", "synthetic:review:001").changed, false);
+  const sameCopy = upsertReviewCase(queue, queueInput({ externalId: "102", url: "https://m.bunjang.co.kr/products/102", matchCase: matchCase({ caseId: "synthetic-002" }) }));
+  assert.equal(sameCopy.changed, true);
+  recordMatchDecision(queue, "synthetic-002", "approve", "synthetic:review:002", new Date(), approved.entry.review.comparisonGroupId);
+  assert.equal(sameCopy.entry.status, "approved");
+  assert.equal(queue.entries[1].review.comparisonGroupId, approved.entry.review.comparisonGroupId);
+  assert.throws(() => recordMatchDecision(queue, "synthetic-002", "defer", "synthetic:review:002", new Date(), approved.entry.review.comparisonGroupId), /UUID supplied only with approval/);
   const revised = upsertReviewCase(queue, queueInput({ matchCase: matchCase({ listingIdentity: identity({ parallel: null }) }) }));
   assert.equal(revised.entry.status, "pending");
   assert.equal(revised.entry.revision, 2);
@@ -96,6 +104,7 @@ test("review revisions invalidate approvals and local approval never grants publ
   recordMatchDecision(queue, "synthetic-001", "defer", "synthetic:review:002");
   const summary = summarizeReviewQueue(queue);
   assert.equal(summary.counts.deferred, 1);
+  assert.equal(summary.cases[0].comparisonGroupId, null);
   assert.equal(JSON.stringify(summary).includes("serialNumber"), false);
   assert.throws(() => upsertReviewCase(queue, queueInput({ externalId: "102", url: "https://m.bunjang.co.kr/products/102" })), /another listing/);
 });
