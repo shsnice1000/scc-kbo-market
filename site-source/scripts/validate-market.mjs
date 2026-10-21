@@ -19,6 +19,7 @@ const HOSTS = {
   kbomarket: new Set(["kbomarket.com", "www.kbomarket.com"]),
 };
 const REQUIRED_MARKET_SOURCES = ["bunjang", "break", "wyyyes", "community", "kream", "daewon"];
+const SOURCE_COVERAGE_STATES = new Set(["not_checked", "access_blocked", "partial_scan", "complete_scope_scan"]);
 const OBS_FIELDS = new Set([
   "id", "cardId", "kind", "state", "matchLevel", "sourceId", "title", "price", "shippingPrice",
   "checkedAt", "url", "matchNote", "postedTimeAtCheck",
@@ -119,9 +120,23 @@ export function validateMarket(data, label = "market.json", { now = Date.now(), 
   }
 
   for (const source of data.sources) {
-    for (const key of Object.keys(source)) if (!new Set(["id", "name", "kind", "status", "note", "url"]).has(key)) fail("source contains unsupported field " + key);
+    const allowedSourceFields = new Set(["id", "name", "kind", "status", "note", "url", "coverage"]);
+    for (const key of Object.keys(source)) if (!allowedSourceFields.has(key)) fail("source contains unsupported field " + key);
     validateUrl(source.url, source.id, "source " + source.id, fail);
     for (const key of ["id", "name", "kind", "status", "note"]) if (typeof source[key] !== "string" || !source[key].trim() || source[key].length > (key === "note" ? 1000 : 160) || PII.test(source[key])) fail("source has invalid public " + key);
+    const coverage = source.coverage;
+    if (!coverage || typeof coverage !== "object" || Array.isArray(coverage)) {
+      fail("source " + source.id + " needs a public coverage state");
+    } else {
+      for (const key of Object.keys(coverage)) if (!new Set(["state", "checkedAt", "scope"]).has(key)) fail("source " + source.id + " coverage contains unsupported field " + key);
+      if (!SOURCE_COVERAGE_STATES.has(coverage.state)) fail("source " + source.id + " has an unknown coverage state");
+      if (coverage.state === "not_checked") {
+        if (coverage.checkedAt !== null || coverage.scope !== null) fail("unverified source " + source.id + " must not claim a checked date or scope");
+      } else {
+        if (!publicDate(coverage.checkedAt, now)) fail("source " + source.id + " needs a valid non-future coverage checkedAt");
+        if (typeof coverage.scope !== "string" || !coverage.scope.trim() || coverage.scope.length > 500 || PII.test(coverage.scope)) fail("source " + source.id + " needs a concise public coverage scope");
+      }
+    }
   }
 
   for (const card of cardsById.values()) {

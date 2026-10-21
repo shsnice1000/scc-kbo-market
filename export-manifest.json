@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "exportedAt": "2026-10-21T05:01:07.613Z",
+  "exportedAt": "2026-10-21T11:10:40.062Z",
   "scope": "allowlisted code and synthetic fixtures; fresh collaboration history",
   "files": [
     {
@@ -41,7 +41,7 @@
     },
     {
       "path": "docs/HANDOFF.md",
-      "sha256": "c7ecea420f423605e3191df0057e50210aa06b32f04e8a321a40cac8d5bf9b58"
+      "sha256": "630c390264641f3960a6072452838bd96900d2bd042c10cd3a0c88d647e07e87"
     },
     {
       "path": "docs/KNOWN_LIMITATIONS.md",
@@ -53,7 +53,7 @@
     },
     {
       "path": "docs/PUBLICATION.md",
-      "sha256": "441c296ed4ccc5a1f46db498c91b997d77524bd96a382439885d3f90438820f6"
+      "sha256": "022563a5ad2b7929f8503d64e9180049f776231347545c132c3cc800e0c3e25f"
     },
     {
       "path": "package.json",
@@ -181,7 +181,7 @@
     },
     {
       "path": "site-source/assets/market.js",
-      "sha256": "1d74c12e362b343062efed9ccc3c681b0c855bce08b64b8878767aef9ddbe9fa"
+      "sha256": "503d96dc70f935a93b34f237234841481dcd716c90c01642916f7b74a67b2eb6"
     },
     {
       "path": "site-source/assets/og-preview.png",
@@ -193,11 +193,11 @@
     },
     {
       "path": "site-source/assets/site.css",
-      "sha256": "04da676085ffb5a3d08a180ba38ad1fb5f8033a5f6aa7f7d7b53be7ac9524e94"
+      "sha256": "e96fc1fb565068fdc05bd7f8e9b1305dab97d9a0cacdf464835557db55e5c9e7"
     },
     {
       "path": "site-source/data/market.json",
-      "sha256": "3b93dc4a2f4597c3fe3fd202b9a9bb1168af567576742f8ff7cd21778300bb86"
+      "sha256": "77da6eb89d2278f9f94c902326b1cfd3a0bdcb2fec58c4e2624bdda0d0ab521b"
     },
     {
       "path": "site-source/index.html",
@@ -233,7 +233,7 @@
     },
     {
       "path": "site-source/scripts/publication.test.mjs",
-      "sha256": "29aaaa2f356db6f48b8d0c755e536ff1ead733d9f4c71c07daa4021b254f9127"
+      "sha256": "9dd27e3217948aaf9a6c9097a7fa46ed79c3289527bb7e714b98c48c043132a3"
     },
     {
       "path": "site-source/scripts/release-evidence.mjs",
@@ -261,7 +261,7 @@
     },
     {
       "path": "site-source/scripts/validate-market.mjs",
-      "sha256": "429622deafabc13cb698057a853f0f2597a2c21650e268d7d97b3e759c243d9b"
+      "sha256": "571230c1be99fc4a330970cf13eebca02feaae179383a192d9be55f2561fcf26"
     },
     {
       "path": "site-source/scripts/validate-release-readiness.mjs",

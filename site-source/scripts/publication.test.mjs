@@ -67,6 +67,63 @@ test("public dates reject future and impossible dates while Korean date-only rec
   assert.ok(errors.some((message) => message.includes("source-review records")), "dates do not bypass review provenance");
 });
 
+test("source coverage requires an explicit state, truthful date, and checked scope", () => {
+  assert.deepEqual(validate(fixture()).errors, []);
+  for (const coverage of [
+    undefined,
+    { state: "unknown", checkedAt: null, scope: null },
+    { state: "not_checked", checkedAt: "2026-10-20", scope: null },
+    { state: "not_checked", checkedAt: null, scope: "synthetic scope" },
+    { state: "partial_scan", checkedAt: null, scope: "synthetic scope" },
+    { state: "access_blocked", checkedAt: "2099-01-01", scope: "synthetic scope" },
+    { state: "complete_scope_scan", checkedAt: "2026-10-20T21:00:00Z", scope: "synthetic@example.test" },
+    { state: "complete_scope_scan", checkedAt: "2026-10-20T21:00:00Z", scope: " " },
+  ]) {
+    const data = fixture();
+    if (coverage === undefined) delete data.sources[0].coverage;
+    else data.sources[0].coverage = coverage;
+    assert.ok(validate(data).errors.some((message) => message.includes("source bunjang")), JSON.stringify(coverage));
+  }
+  for (const state of ["access_blocked", "partial_scan", "complete_scope_scan"]) {
+    const data = fixture();
+    data.sources[0].coverage = { state, checkedAt: "2026-10-20T21:00:00Z", scope: "synthetic result page" };
+    assert.deepEqual(validate(data).errors, [], state);
+  }
+});
+
+test("source cards distinguish unchecked, blocked, partial, and complete empty coverage", async () => {
+  const source = (await readFile(path.join(root, "assets/market.js"), "utf8")).replace(/\bstart\(\);\s*$/, "");
+  const elements = new Map([["#source-grid", { innerHTML: "" }], ["#observation-list", { innerHTML: "" }]]);
+  const context = vm.createContext({
+    document: { querySelector: (selector) => elements.get(selector) || { innerHTML: "" } },
+    localStorage: { getItem: () => null },
+    window: { location: { href: "https://scc-market.test/" } },
+    URL,
+  });
+  vm.runInContext(source, context);
+  context.syntheticData = fixture();
+  context.syntheticData.sources[0].coverage = { state: "complete_scope_scan", checkedAt: "2026-10-20T21:00:00Z", scope: "synthetic result page" };
+  context.syntheticData.sources[1].coverage = { state: "access_blocked", checkedAt: "2026-10-20T21:00:00Z", scope: "synthetic login page" };
+  context.syntheticData.sources[2].coverage = { state: "partial_scan", checkedAt: "2026-10-20T21:00:00Z", scope: "synthetic first page" };
+  context.syntheticData.sources[4].coverage = { state: "complete_scope_scan", checkedAt: "2026-09-01", scope: "synthetic older scan" };
+  context.syntheticData.sources[5].coverage = { state: "partial_scan", checkedAt: "2026-10-20T21:00:00Z", scope: "<script>synthetic()</script>" };
+  vm.runInContext("marketData = syntheticData; renderSources()", context);
+  const html = elements.get("#source-grid").innerHTML;
+  assert.match(html, /data-coverage-state="complete_scope_scan"/);
+  assert.match(html, /확인 당시 범위에서 새로 공개할 가격 근거가 확인되지 않았습니다\./);
+  assert.match(html, /synthetic result page/);
+  assert.match(html, /접근 차단 ·/);
+  assert.match(html, /매물 유무를 확인하지 못했습니다\./);
+  assert.match(html, /일부 확인 ·/);
+  assert.match(html, /일부 범위만 확인했으며 전체 출처 자료를 뜻하지 않습니다\./);
+  assert.match(html, /확인 전/);
+  assert.match(html, /공개 기록 0건은 매물 부재를 뜻하지 않습니다\./);
+  assert.match(html, /data-coverage-stale="true"/);
+  assert.match(html, /갱신 지연 · 범위 확인 완료 ·/);
+  assert.match(html, /&lt;script&gt;synthetic\(\)&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script>synthetic\(\)<\/script>/);
+});
+
 test("UI consumes only the reviewed global price array even if nested prices reach the browser", async () => {
   const source = (await readFile(path.join(root, "assets/market.js"), "utf8")).replace(/\bstart\(\);\s*$/, "");
   const context = vm.createContext({ document: { querySelector: () => ({}) }, localStorage: { getItem: () => null } });

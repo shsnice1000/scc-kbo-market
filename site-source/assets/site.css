@@ -35,6 +35,14 @@
   .card-subtitle,.market-count,.card-detail-button{font-size:9px}
 }
 
+.source-status{overflow-wrap:anywhere}
+.source-status[data-coverage-state="not_checked"]{color:#765d36}
+.source-status[data-coverage-state="access_blocked"]{color:#963f32}
+.source-status[data-coverage-state="partial_scan"]{color:#80591b}
+.source-status[data-coverage-state="complete_scope_scan"]{color:#245b3c}
+.source-status[data-coverage-stale="true"]{color:#80591b}
+.source-description{overflow-wrap:anywhere}
+
 /* Readable evidence text and record summaries */
 .hero-note,.hero-card-foot,.stat-label,.stat-note,.snapshot-date>span:last-child,.field-label,.filter-group legend,.filter-choice,.choice-count,.filter-note p,.catalog-intro,.card-team,.card-subtitle,.market-count,.card-detail-button,.section-heading-row p,.source-kind,.source-status,.source-description,.source-meta,.observation-state,.observation-main p,.observation-price span,.observation-foot,.observation-foot a,.observation-match,.observation-match-label,.records-footnote,.dialog-title-row p,.dialog-hint,.record-row p,.record-tab,.draft-confirmation,.brand-copy small,.hero-card-top,.mini-label,.step-number,.how-lead p,.how-step p,.footer-main>p,.back-top,.footer-bottom{font-size:12px;color:#46574c}
 .source-meta a,.observation-foot a,.observation-match{color:#174d37}

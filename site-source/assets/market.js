@@ -129,6 +129,36 @@ function formatObservationDate(value) {
   return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium", timeStyle: "short" }).format(observationTimestamp(value)) + " (한국시간)";
 }
 
+function sourceCoveragePresentation(source, recordCount) {
+  const coverage = source.coverage || {};
+  const scope = coverage.scope ? ` 확인 범위: ${coverage.scope}.` : "";
+  const checkedTime = observationTimestamp(coverage.checkedAt);
+  const stale = Number.isFinite(checkedTime) && Date.now() - checkedTime >= 7 * 86_400_000;
+  const datedLabel = (label) => `${stale ? "갱신 지연 · " : ""}${label} · ${formatObservationDate(coverage.checkedAt)}`;
+  if (coverage.state === "access_blocked") return {
+    stale,
+    label: datedLabel("접근 차단"),
+    description: "마지막 확인 때 출처에 접근하지 못해 매물 유무를 확인하지 못했습니다." + scope
+  };
+  if (coverage.state === "partial_scan") return {
+    stale,
+    label: datedLabel("일부 확인"),
+    description: "마지막 확인에서 일부 범위만 확인했으며 전체 출처 자료를 뜻하지 않습니다." + scope
+  };
+  if (coverage.state === "complete_scope_scan") return {
+    stale,
+    label: datedLabel("범위 확인 완료"),
+    description: recordCount === 0
+      ? "확인 당시 범위에서 새로 공개할 가격 근거가 확인되지 않았습니다." + scope
+      : "기록 수와 가격별 확인일은 아래 공개 기록에서 확인할 수 있습니다." + scope
+  };
+  return {
+    stale: false,
+    label: "확인 전",
+    description: "아직 이 출처를 확인하지 않았습니다. 공개 기록 0건은 매물 부재를 뜻하지 않습니다."
+  };
+}
+
 function observationAgeLabel(checkedAt) {
   const timestamp = observationTimestamp(checkedAt);
   if (!Number.isFinite(timestamp)) return "확인일 미기록 · 현재 상태 미확인";
@@ -222,12 +252,10 @@ function renderSources() {
     const checked = count
       ? `공개 기록 ${count}건 · ${escapeHTML(observationAgeLabel(lastChecked))}`
       : "공개 가격 기록 0건";
-    const emptyNote = count ? "" : (source.note || "아직 공개 가능한 가격 기록이 없습니다. 플랫폼에 매물이 없다는 뜻은 아닙니다.");
     const sourceHref = safeExternalHref(source.url);
     const sourceLink = sourceHref ? `<a href="${escapeHTML(sourceHref)}" target="_blank" rel="noopener noreferrer">출처 열기 ↗</a>` : "<span>출처 링크 없음</span>";
-    const status = source.status;
-    const description = count ? source.note : emptyNote;
-    return `<article class="source-card"><div class="source-card-top"><h3>${escapeHTML(source.name)}</h3><span class="source-kind">${escapeHTML(source.kind)}</span></div><p class="source-status">${escapeHTML(status)}</p><p class="source-description">${escapeHTML(description)}</p><div class="source-meta"><span>${checked}</span>${sourceLink}</div></article>`;
+    const coverage = sourceCoveragePresentation(source, count);
+    return `<article class="source-card"><div class="source-card-top"><h3>${escapeHTML(source.name)}</h3><span class="source-kind">${escapeHTML(source.kind)}</span></div><p class="source-status" data-coverage-state="${escapeHTML(source.coverage?.state || "not_checked")}" data-coverage-stale="${coverage.stale}">${escapeHTML(coverage.label)}</p><p class="source-description">${escapeHTML(coverage.description)}</p><div class="source-meta"><span>${checked}</span>${sourceLink}</div></article>`;
   }).join("");
   document.querySelector("#source-grid").innerHTML = entries;
   renderObservationList(records);
