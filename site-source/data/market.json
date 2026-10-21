@@ -3,12 +3,12 @@
   "status": "협업 개발용",
   "observations": [],
   "sources": [
-    {"id":"bunjang","name":"번개장터","kind":"중고거래","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://m.bunjang.co.kr/"},
-    {"id":"break","name":"BREAK","kind":"경매 · 싱글","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://break.co.kr/"},
-    {"id":"wyyyes","name":"WYYYES","kind":"라이브 · 브레이크","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://wyyyes.com/"},
-    {"id":"community","name":"전문 수집가 카페","kind":"직거래 · 교환","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://cafe.naver.com/"},
-    {"id":"kream","name":"크림(KREAM)","kind":"리셀","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://kream.co.kr/"},
-    {"id":"daewon","name":"대원샵","kind":"공식 판매","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://www.daewonshop.com/"}
+    {"id":"bunjang","name":"번개장터","kind":"중고거래","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://m.bunjang.co.kr/","coverage":{"state":"not_checked","checkedAt":null,"scope":null}},
+    {"id":"break","name":"BREAK","kind":"경매 · 싱글","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://break.co.kr/","coverage":{"state":"not_checked","checkedAt":null,"scope":null}},
+    {"id":"wyyyes","name":"WYYYES","kind":"라이브 · 브레이크","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://wyyyes.com/","coverage":{"state":"not_checked","checkedAt":null,"scope":null}},
+    {"id":"community","name":"전문 수집가 카페","kind":"직거래 · 교환","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://cafe.naver.com/","coverage":{"state":"not_checked","checkedAt":null,"scope":null}},
+    {"id":"kream","name":"크림(KREAM)","kind":"리셀","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://kream.co.kr/","coverage":{"state":"not_checked","checkedAt":null,"scope":null}},
+    {"id":"daewon","name":"대원샵","kind":"공식 판매","status":"수집 전","note":"개발용 예시이며 실제 가격 자료가 없습니다.","url":"https://www.daewonshop.com/","coverage":{"state":"not_checked","checkedAt":null,"scope":null}}
   ],
   "officialCatalog": {"status":"awaiting_official_checklist","sourceUrl":null,"verifiedAt":null,"cards":[]},
   "candidates": [{

@@ -30,4 +30,6 @@ npm run dev
 
 ## 협업
 
+다음 작업은 [개발 인계](docs/HANDOFF.md)의 수정 우선순위와 완료 기준을 기준으로 진행합니다.
+
 `main`에서 작업 브랜치를 만들고 Pull Request로 합칩니다. `npm test`, `npm run check`, `npm run check:public`을 통과시켜 주세요. 비공개 설정과 실자료는 각 개발자의 `.ops-private/`에만 두고 공유하지 않습니다. [협업 절차](CONTRIBUTING.md), [개발 안내](docs/DEVELOPMENT.md), [현재 제한](docs/KNOWN_LIMITATIONS.md)을 먼저 읽어 주세요.

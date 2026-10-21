@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { SOURCE_CATALOG } from "./market-ops/catalog.mjs";
 import { runIngest, runRefresh } from "./market-ops/refresh.mjs";
 import { validateSnapshot } from "./market-ops/snapshot.mjs";
 import { buildSnapshotTemplate } from "./market-ops/snapshot-template.mjs";
-import { applyPrivateObservation, pruneExpired, retractObservation, withDatabase } from "./market-ops/store.mjs";
+import { applyPrivateObservation, pruneExpired, readDatabase, retractObservation, restoreSuppressedListing, withDatabase } from "./market-ops/store.mjs";
+import { refreshExitCode } from "./market-ops/run-outcome.mjs";
+import { databaseHealth } from "./market-ops/database-health.mjs";
 import { readPrivateObservation } from "./market-ops/private-observation.mjs";
 import { buildBunjangCatalogSnapshot, bunjangCatalogGeneratedAt } from "./market-ops/collectors/bunjang-catalog.mjs";
 import { createBunjangSearchCollector } from "./market-ops/collectors/bunjang-search.mjs";
@@ -15,7 +17,9 @@ import { buildMatchReviewTemplateV2 } from "./market-ops/identity.mjs";
 import { readReviewQueue, updateReviewQueue, upsertReviewCase, recordMatchDecision, summarizeReviewQueue } from "./market-ops/review-queue.mjs";
 import { buildSampleReadiness, formatSampleReadiness } from "./market-ops/sample-readiness.mjs";
 import { parseRefreshArgs } from "./market-ops/refresh-args.mjs";
+import { ensurePrivateDirectory, privateDirectory, resolvePrivateFile } from "./market-ops/private-storage.mjs";
 import { createReadStream } from "node:fs";
+import { buildPublicationDraft, createPublicationSelectionTemplate, readPublicationSelection, writePublicationDraft } from "./market-ops/publication-export.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = path.join(root, ".ops-private", "market-ops");
@@ -25,6 +29,7 @@ function help() {
 
 Usage:
   node scripts/market-ops.mjs status
+  node scripts/market-ops.mjs health
   node scripts/market-ops.mjs refresh [--snapshot <reviewed.json> ...] [--scheduled]
   node scripts/market-ops.mjs refresh --inbox [--scheduled]
   node scripts/market-ops.mjs refresh --bunjang-config .ops-private/bunjang/collector-config.json [--scheduled]
@@ -37,7 +42,9 @@ Usage:
   node scripts/market-ops.mjs match-review <private-match-case.json>
   node scripts/market-ops.mjs match-queue-add <private-queue-input.json>
   node scripts/market-ops.mjs match-queue-list
-  node scripts/market-ops.mjs match-queue-decide <case-id> <approve|defer|reject> <private-evidence-ref>
+  node scripts/market-ops.mjs match-queue-decide <case-id> <approve|defer|reject> <private-evidence-ref> [comparison-group-uuid]
+  node scripts/market-ops.mjs publication-export-template
+  node scripts/market-ops.mjs publication-export <.ops-private/publication-export/selection.json> [--dry-run]
   node scripts/market-ops.mjs history <source-id> <external-id>
   node scripts/market-ops.mjs private-note <private-observation.json>
   node scripts/market-ops.mjs private-template <note-id>
@@ -45,6 +52,7 @@ Usage:
   node scripts/market-ops.mjs private-history <note-id>
   node scripts/market-ops.mjs sample-readiness
   node scripts/market-ops.mjs retract <source-id> <external-id> <reason-code> <private-evidence-ref>
+  node scripts/market-ops.mjs restore <source-id> <external-id> <private-evidence-ref> <reviewer-role>
   node scripts/market-ops.mjs prune
 
 Snapshot files must contain only reviewed metadata. See docs/6플랫폼-MVP-2-3단계.md.
@@ -52,6 +60,7 @@ Normalized operation data is stored under .ops-private/market-ops/; inputs and t
 Platform templates deliberately fail review until real permission is recorded.
 The Bunjang search collector runs only when the explicit --bunjang-config option points to a private config and token provider; it makes partner API requests.
 Private notes from user-provided screenshots or manually checked public UI are stored separately from platform snapshots and are never eligible for public-site export.
+Publication export requires a separately reviewed selection, current source permission, independent-market origin, and approved exact physical-copy identity. It writes only to .ops-private/publication-export/drafts; it never updates public site files.
 No platform request is sent by default. A valid private Bunjang config and explicit --bunjang-config option enable the partner search collector for that run only.
 Use --scheduled only in the configured operating-system scheduler action; ordinary manual runs are recorded separately. This flag records the invocation source and does not create or enable a schedule.
 Multiple same-source snapshots are accepted only for a same-scope Bunjang Full/Segment catalog sequence. Processed feeds are skipped by a private watermark; a Segment gap over 24 hours requires a new Full baseline.
@@ -64,21 +73,11 @@ function isWithinDirectory(parent, target) {
 }
 
 async function resolvePrivateBunjangFile(filePath, label) {
-  const privateRoot = path.join(root, ".ops-private");
-  const privateDir = path.join(root, ".ops-private", "bunjang");
-  const inputPath = path.resolve(root, filePath);
-  const privateRootStat = await lstat(privateRoot).catch(() => null);
-  const privateDirStat = await lstat(privateDir).catch(() => null);
-  if (!privateRootStat?.isDirectory() || privateRootStat.isSymbolicLink() || !privateDirStat?.isDirectory() || privateDirStat.isSymbolicLink()) {
-    throw new Error("Bunjang private config path must use real .ops-private/bunjang directories");
-  }
-  const privateDirReal = await realpath(privateDir).catch(() => null);
-  if (!privateDirReal) throw new Error("Bunjang collector config directory is missing; create .ops-private/bunjang after confirming partner approval");
-  const inputStat = await lstat(inputPath).catch(() => null);
-  if (!inputStat?.isFile() || inputStat.isSymbolicLink()) throw new Error(`${label} must be a regular, non-symlink file under .ops-private/bunjang`);
-  const fileReal = await realpath(inputPath);
-  if (!isWithinDirectory(privateDirReal, fileReal)) throw new Error(`${label} must resolve inside .ops-private/bunjang`);
-  return fileReal;
+  const bunjangDir = await privateDirectory(root, ["bunjang"]);
+  if (!bunjangDir) throw new Error("Bunjang collector config directory is missing; create .ops-private/bunjang after confirming partner approval");
+  const { resolved } = await resolvePrivateFile(root, filePath, label);
+  if (!isWithinDirectory(bunjangDir, resolved)) throw new Error(`${label} must stay inside .ops-private/bunjang`);
+  return resolved;
 }
 
 async function loadBunjangCollector(configArgument) {
@@ -124,12 +123,12 @@ async function loadBunjangCollector(configArgument) {
 }
 
 async function listInboxSnapshots() {
-  const inboxDir = path.join(root, ".ops-private", "inbox");
+  const inboxDir = await privateDirectory(root, ["inbox"]);
+  if (!inboxDir) throw new Error("reviewed snapshot inbox does not exist; create .ops-private/inbox first");
   let entries;
   try {
     entries = await readdir(inboxDir, { withFileTypes: true });
   } catch (error) {
-    if (error.code === "ENOENT") throw new Error("reviewed snapshot inbox does not exist; create .ops-private/inbox first");
     throw error;
   }
   const files = entries
@@ -143,8 +142,7 @@ async function listInboxSnapshots() {
 async function createTemplates(sourceId) {
   const selected = sourceId ? SOURCE_CATALOG.filter((source) => source.id === sourceId) : SOURCE_CATALOG;
   if (!selected.length) throw new Error(`unknown source id: ${sourceId}`);
-  const templateDir = path.join(root, ".ops-private", "templates");
-  await mkdir(templateDir, { recursive: true });
+  const templateDir = await ensurePrivateDirectory(root, ["templates"]);
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
   const created = [];
   for (const source of selected) {
@@ -158,8 +156,7 @@ async function createTemplates(sourceId) {
 }
 
 async function createBunjangSearchTemplate() {
-  const templateDir = path.join(root, ".ops-private", "bunjang");
-  await mkdir(templateDir, { recursive: true });
+  const templateDir = await ensurePrivateDirectory(root, ["bunjang"]);
   const files = [
     {
       path: path.join(templateDir, "collector-config.json"),
@@ -203,17 +200,7 @@ async function createBunjangSearchTemplate() {
 }
 
 async function privateInputPath(inputPath, label) {
-  const privateRoot = await realpath(path.join(root, ".ops-private"));
-  let resolved;
-  try {
-    resolved = await realpath(path.resolve(inputPath));
-  } catch {
-    throw new Error(`${label} cannot be accessed`);
-  }
-  if (!resolved.startsWith(`${privateRoot}${path.sep}`)) throw new Error(`${label} must be stored under .ops-private`);
-  const fileStat = await stat(resolved);
-  if (!fileStat.isFile()) throw new Error(`${label} must be a regular file`);
-  return { resolved, fileStat };
+  return resolvePrivateFile(root, inputPath, label);
 }
 
 async function reviewMatchCase(inputPath) {
@@ -227,8 +214,7 @@ async function reviewMatchCase(inputPath) {
 
 async function createMatchReviewTemplate(caseId) {
   const template = buildMatchReviewTemplateV2(caseId);
-  const templateDir = path.join(root, ".ops-private", "match-cases");
-  await mkdir(templateDir, { recursive: true });
+  const templateDir = await ensurePrivateDirectory(root, ["match-cases"]);
   const filePath = path.join(templateDir, `${caseId}.json`);
   await writeFile(filePath, `${JSON.stringify(template, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
   console.log(`Created private card-match review template: ${path.relative(root, filePath)}`);
@@ -243,14 +229,13 @@ async function addMatchReviewQueue(inputPath) {
   console.log(JSON.stringify({ changed: result.changed, caseId: result.entry.caseId, status: result.entry.status, revision: result.entry.revision, proposal: result.entry.proposal, publicPublicationAllowed: false }, null, 2));
 }
 
-async function decideMatchReviewQueue(caseId, decision, evidenceRef) {
-  const result = await updateReviewQueue(root, (queue) => recordMatchDecision(queue, caseId, decision, evidenceRef));
-  console.log(JSON.stringify({ changed: result.changed, caseId: result.entry.caseId, status: result.entry.status, identityComparable: result.entry.proposal.identityComparable, publicPublicationAllowed: false }, null, 2));
+async function decideMatchReviewQueue(caseId, decision, evidenceRef, comparisonGroupId) {
+  const result = await updateReviewQueue(root, (queue) => recordMatchDecision(queue, caseId, decision, evidenceRef, new Date(), comparisonGroupId ?? null));
+  console.log(JSON.stringify({ changed: result.changed, caseId: result.entry.caseId, status: result.entry.status, identityComparable: result.entry.proposal.identityComparable, comparisonGroupId: result.entry.review?.comparisonGroupId ?? null, publicPublicationAllowed: false }, null, 2));
 }
 
 async function createBunjangCatalogTemplate() {
-  const templateDir = path.join(root, ".ops-private", "templates");
-  await mkdir(templateDir, { recursive: true });
+  const templateDir = await ensurePrivateDirectory(root, ["templates"]);
   const stamp = new Date().toISOString().replace(/[-:.]/g, "");
   const filePath = path.join(templateDir, `bunjang-catalog-${stamp}.json`);
   const template = {
@@ -300,8 +285,7 @@ async function importBunjangCatalog(mode, catalogPath, configPath) {
     throw error;
   }
   validateSnapshot(result.snapshot);
-  const inboxDir = path.join(root, ".ops-private", "inbox");
-  await mkdir(inboxDir, { recursive: true });
+  const inboxDir = await ensurePrivateDirectory(root, ["inbox"]);
   const stamp = new Date().toISOString().replace(/[-:.]/g, "");
   const outputPath = path.join(inboxDir, `bunjang-${mode}-${stamp}.json`);
   await writeFile(outputPath, `${JSON.stringify(result.snapshot, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
@@ -439,8 +423,7 @@ async function createPrivateFollowUpTemplate(noteId) {
       evidenceFile: previous.captureMethod === "manual-browser-ui" ? null : "REPLACE_WITH_WORKSPACE_RELATIVE_IMAGE_PATH",
       privateAuthorization: previous.privateAuthorization,
     };
-    const templateDir = path.join(root, ".ops-private", "private-observations");
-    await mkdir(templateDir, { recursive: true });
+    const templateDir = await ensurePrivateDirectory(root, ["private-observations"]);
     const stamp = new Date().toISOString().replace(/[-:.]/g, "").replace(/Z$/, "Z");
     const filePath = path.join(templateDir, `${noteId}-followup-${stamp}.json`);
     await writeFile(filePath, `${JSON.stringify(template, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
@@ -479,22 +462,40 @@ async function showPrivateHistory(noteId) {
   });
 }
 
+async function exportPublicationDraft(selectionArgument, dryRun) {
+  const selection = await readPublicationSelection(root, selectionArgument);
+  const [db, queue] = await Promise.all([readDatabase(dataDir), readReviewQueue(root)]);
+  if (!db) throw new Error("operations database has no imported public observations");
+  const siteRoot = path.join(root, "site-source");
+  const market = JSON.parse(await readFile(path.join(siteRoot, "data", "market.json"), "utf8"));
+  const draft = buildPublicationDraft({ db, queue, selection, market, siteRoot, now: Date.now() });
+  const result = await writePublicationDraft(root, draft, { dryRun });
+  if (dryRun) console.log(`DRY RUN: ${result.observationCount} eligible observation(s); private draft would be ${result.path}; sha256 ${result.sha256}`);
+  else console.log(`${result.alreadyExists ? "Existing" : "Created"} private publication draft: ${result.path} (${result.observationCount} observation(s), sha256 ${result.sha256})`);
+}
+
 async function retractPublicObservation(sourceId, externalId, reasonCode, evidenceRef) {
   const result = await withDatabase(dataDir, async (db) => retractObservation(db, sourceId, externalId, reasonCode, evidenceRef));
   if (!result.retracted) {
-    console.log(`No local public snapshot observation found for ${sourceId}:${externalId}; no changes made.`);
+    console.log(`Already suppressed ${sourceId}:${externalId}; no observations or history restored.`);
     return;
   }
   console.log(`Retracted ${sourceId}:${externalId} from the local public snapshot store.`);
   console.log(`  Removed observations: ${result.observationsRemoved}; price-history events: ${result.priceEventsRemoved}`);
   console.log(`  Correction reason: ${reasonCode}; private evidence reference: ${evidenceRef}`);
-  console.log("This command does not contact a platform or change the public site. Re-import only after a fresh human review.");
+  console.log("Future imports for this listing are suppressed. Restore with reviewed evidence, then collect a newer observation before re-importing. The public site must be corrected separately.");
 }
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   if (!command || command === "help" || command === "--help" || command === "-h") return help();
   if (command === "status" && !args.length) return showStatus();
+  if (command === "health" && !args.length) {
+    const health = await databaseHealth(dataDir);
+    console.log(JSON.stringify(health, null, 2));
+    process.exitCode = health.exitCode;
+    return;
+  }
   if (command === "refresh") {
     const options = parseRefreshArgs(args);
     if (options.inbox) options.snapshotFiles = await listInboxSnapshots();
@@ -503,6 +504,7 @@ async function main() {
       : {};
     const result = await runRefresh({ dataDir, snapshotFiles: options.snapshotFiles, collectors, runOrigin: options.runOrigin });
     printRun(result.run);
+    process.exitCode = refreshExitCode(result.run);
     return;
   }
   if (command === "template" && args.length <= 1) return createTemplates(args[0]);
@@ -516,7 +518,18 @@ async function main() {
     console.log(JSON.stringify(summarizeReviewQueue(await readReviewQueue(root)), null, 2));
     return;
   }
-  if (command === "match-queue-decide" && args.length === 3) return decideMatchReviewQueue(...args);
+  if (command === "match-queue-decide" && (args.length === 3 || args.length === 4)) return decideMatchReviewQueue(...args);
+  if (command === "publication-export-template" && !args.length) {
+    const result = await createPublicationSelectionTemplate(root);
+    console.log(`${result.created ? "Created" : "Preserved existing"} private publication selection template: ${result.path}`);
+    return;
+  }
+  if (command === "publication-export") {
+    const dryRun = args.includes("--dry-run");
+    const files = args.filter((argument) => argument !== "--dry-run");
+    if (files.length !== 1) throw new Error("publication-export needs one selection JSON path and optional --dry-run");
+    return exportPublicationDraft(files[0], dryRun);
+  }
   if (command === "ingest" && args.length === 1) {
     const result = await runIngest({ dataDir, snapshotFile: path.resolve(args[0]) });
     printRun(result.run);
@@ -530,13 +543,20 @@ async function main() {
   if (command === "private-list" && !args.length) return listPrivateNotes();
   if (command === "private-history" && args.length === 1) return showPrivateHistory(args[0]);
   if (command === "sample-readiness" && !args.length) {
+    const sampleDir = await privateDirectory(root, ["sample-prep", "2026-sensation"]);
+    if (!sampleDir) throw new Error("private sample preparation evidence folder is missing");
     const report = await buildSampleReadiness({
-      sampleDir: path.join(root, ".ops-private", "sample-prep", "2026-sensation"),
+      sampleDir,
     });
     console.log(formatSampleReadiness(report));
     return;
   }
   if (command === "retract" && args.length === 4) return retractPublicObservation(args[0], args[1], args[2], args[3]);
+  if (command === "restore" && args.length === 4) {
+    const result = await withDatabase(dataDir, async (db) => restoreSuppressedListing(db, ...args));
+    console.log(JSON.stringify(result));
+    return;
+  }
   if (command === "prune" && !args.length) {
     const pruned = await withDatabase(dataDir, async (db) => pruneExpired(db));
     console.log(`Removed ${pruned.observations} observations, ${pruned.priceEvents} price events, ${pruned.reviewLedger} review records.`);

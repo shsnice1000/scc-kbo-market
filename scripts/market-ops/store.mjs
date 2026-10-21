@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, lstat } from "node:fs/promises";
 import path from "node:path";
 import { SOURCE_CATALOG } from "./catalog.mjs";
+import { privateDirectory } from "./private-storage.mjs";
 
 export const DB_SCHEMA_VERSION = 1;
 const MAX_RUNS = 200;
@@ -18,6 +19,7 @@ export function emptyDatabase(now = new Date().toISOString()) {
     privatePriceEvents: [],
     reviewLedger: [],
     correctionEvents: [],
+    listingSuppressions: {},
     retentionEvents: [],
     sourceStatus: Object.fromEntries(SOURCE_CATALOG.map((source) => [source.id, {
       state: "not_connected",
@@ -39,6 +41,7 @@ function assertDatabase(db) {
   }
   db.retentionEvents ??= [];
   db.correctionEvents ??= [];
+  ensureListingSuppressions(db);
   for (const key of ["observations", "priceEvents", "reviewLedger", "correctionEvents", "retentionEvents", "runs"]) {
     if (!Array.isArray(db[key])) throw new Error(`local database field ${key} is invalid`);
   }
@@ -67,16 +70,46 @@ const CORRECTION_REASONS = new Set([
   "other_reviewed_correction",
 ]);
 
-export function retractObservation(db, sourceId, externalId, reasonCode, evidenceRef, now = new Date()) {
+function ensureListingSuppressions(db) {
+  if (db.listingSuppressions == null) {
+    db.listingSuppressions = {};
+    for (const event of db.correctionEvents ?? []) {
+      if (event.action === "restore") db.listingSuppressions[event.listingKey] = { active: false, restoredAt: event.at, restorationEvidenceRef: event.evidenceRef };
+      else db.listingSuppressions[event.listingKey] = { active: true, at: event.at, reasonCode: event.reasonCode, evidenceRef: event.evidenceRef };
+    }
+  }
+  if (typeof db.listingSuppressions !== "object" || Array.isArray(db.listingSuppressions)) throw new Error("local listing suppression registry is invalid");
+  return db.listingSuppressions;
+}
+
+function correctionTarget(sourceId, externalId, evidenceRef) {
   if (!SOURCE_CATALOG.some((source) => source.id === sourceId)) throw new Error(`unknown source id: ${sourceId}`);
   if (typeof externalId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(externalId)) throw new Error("external id has an invalid format");
-  if (!CORRECTION_REASONS.has(reasonCode)) throw new Error("correction reason code is not allowed");
   if (typeof evidenceRef !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/.test(evidenceRef)) throw new Error("private evidence reference has an invalid format");
   if (/(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:\+?82[- .]?)?0?1[016789][-. ]?\d{3,4}[- .]?\d{4})/i.test(evidenceRef)) throw new Error("private evidence reference must not contain contact information");
+  return `${sourceId}:${externalId}`;
+}
+
+export function restoreSuppressedListing(db, sourceId, externalId, evidenceRef, reviewerRole, now = new Date()) {
+  const listingKey = correctionTarget(sourceId, externalId, evidenceRef);
+  if (typeof reviewerRole !== "string" || !/^[A-Za-z][A-Za-z0-9_-]{2,79}$/.test(reviewerRole)) throw new Error("reviewer role must be a non-identifying role label");
+  const registry = ensureListingSuppressions(db), previous = registry[listingKey];
+  if (!previous || previous.active === false) return { restored: false };
+  registry[listingKey] = { ...previous, active: false, restoredAt: now.toISOString(), restorationEvidenceRef: evidenceRef, reviewerRole };
   db.correctionEvents ??= [];
-  const listingKey = `${sourceId}:${externalId}`;
+  db.correctionEvents.push({ action: "restore", at: now.toISOString(), listingKey, evidenceRef, reviewerRole });
+  db.correctionEvents = db.correctionEvents.slice(-200);
+  return { restored: true, requiresObservationAfter: now.toISOString() };
+}
+
+export function retractObservation(db, sourceId, externalId, reasonCode, evidenceRef, now = new Date()) {
+  const listingKey = correctionTarget(sourceId, externalId, evidenceRef);
+  if (!CORRECTION_REASONS.has(reasonCode)) throw new Error("correction reason code is not allowed");
+  db.correctionEvents ??= [];
+  const registry = ensureListingSuppressions(db);
   const exists = db.observations.some((row) => row.listingKey === listingKey);
-  if (!exists) return { retracted: false, observationsRemoved: 0, priceEventsRemoved: 0 };
+  if (!exists && registry[listingKey]?.active === true) return { retracted: false, observationsRemoved: 0, priceEventsRemoved: 0 };
+  registry[listingKey] = { active: true, at: now.toISOString(), reasonCode, evidenceRef };
   const before = db.observations.length;
   db.observations = db.observations.filter((row) => row.listingKey !== listingKey);
   const observationsRemoved = before - db.observations.length;
@@ -84,6 +117,7 @@ export function retractObservation(db, sourceId, externalId, reasonCode, evidenc
   db.priceEvents = db.priceEvents.filter((row) => row.listingKey !== listingKey);
   const priceEventsRemoved = eventsBefore - db.priceEvents.length;
   db.correctionEvents.push({
+    action: "retract",
     at: now.toISOString(),
     listingKey,
     reasonCode,
@@ -120,13 +154,25 @@ async function acquireLock(lockPath) {
 }
 
 export async function withDatabase(dataDir, work) {
-  await mkdir(dataDir, { recursive: true });
-  const dbPath = path.join(dataDir, "market-ops.json");
-  const lockPath = path.join(dataDir, "market-ops.lock");
+  const absoluteDataDir = path.resolve(dataDir);
+  const privateParent = path.dirname(absoluteDataDir);
+  if (path.basename(privateParent) === ".ops-private") {
+    await privateDirectory(path.dirname(privateParent), [path.basename(absoluteDataDir)], { create: true });
+  } else {
+    await mkdir(absoluteDataDir, { recursive: true });
+    const directoryStat = await lstat(absoluteDataDir);
+    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new Error("local database storage must use a real directory, not a symlink");
+  }
+  const dataDirectoryStat = await lstat(absoluteDataDir);
+  if (!dataDirectoryStat.isDirectory() || dataDirectoryStat.isSymbolicLink()) throw new Error("local database storage must use a real directory, not a symlink");
+  const dbPath = path.join(absoluteDataDir, "market-ops.json");
+  const lockPath = path.join(absoluteDataDir, "market-ops.lock");
   const handle = await acquireLock(lockPath);
   try {
     let db;
     try {
+      const dbStat = await lstat(dbPath);
+      if (!dbStat.isFile() || dbStat.isSymbolicLink() || dbStat.size > 64 * 1024 * 1024) throw new Error("expected a regular local database under 64 MiB");
       db = JSON.parse(await readFile(dbPath, "utf8"));
       assertDatabase(db);
     } catch (error) {
@@ -154,6 +200,29 @@ export async function withDatabase(dataDir, work) {
     await handle.close();
     await rm(lockPath, { force: true });
   }
+}
+
+export async function readDatabase(dataDir) {
+  const absoluteDataDir = path.resolve(dataDir);
+  const privateParent = path.dirname(absoluteDataDir);
+  let directory;
+  if (path.basename(privateParent) === ".ops-private") {
+    directory = await privateDirectory(path.dirname(privateParent), [path.basename(absoluteDataDir)]);
+    if (!directory) return null;
+  } else {
+    try { directory = await lstat(absoluteDataDir); }
+    catch (error) { if (error.code === "ENOENT") return null; throw error; }
+    if (!directory.isDirectory() || directory.isSymbolicLink()) throw new Error("local database storage must use a real directory, not a symlink");
+    directory = absoluteDataDir;
+  }
+  const file = path.join(directory, "market-ops.json");
+  try {
+    const stat = await lstat(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024 * 1024) throw new Error("expected a regular local database under 64 MiB");
+    const db = JSON.parse(await readFile(file, "utf8"));
+    assertDatabase(db); // Schema defaults are applied only to this in-memory copy.
+    return db;
+  } catch (error) { if (error.code === "ENOENT") return null; throw error; }
 }
 
 function eventFor(previous, next, runId, ingestedAt, expiresAt) {
@@ -184,6 +253,12 @@ function eventFor(previous, next, runId, ingestedAt, expiresAt) {
 }
 
 export function applySnapshot(db, snapshot, runId, now = new Date(), reviewOrdinal = null) {
+  const registry = ensureListingSuppressions(db);
+  const accepted = snapshot.observations.filter((row) => {
+    const suppression = registry[`${snapshot.source.id}:${row.externalId}`];
+    return !suppression || (suppression.active === false && Date.parse(row.observedAt) > Date.parse(suppression.restoredAt));
+  });
+  const suppressed = snapshot.observations.length - accepted.length;
   const ingestedAt = now.toISOString();
   const expiresAt = new Date(now.getTime() + snapshot.review.retentionDays * 86_400_000).toISOString();
   const ledgerId = reviewOrdinal == null ? `${runId}:${snapshot.source.id}` : `${runId}:${snapshot.source.id}:${reviewOrdinal}`;
@@ -193,7 +268,7 @@ export function applySnapshot(db, snapshot, runId, now = new Date(), reviewOrdin
   ));
   if (duplicateReview) return { imported: 0, eventsAdded: 0, duplicate: true };
 
-  for (const row of snapshot.observations) {
+  for (const row of accepted) {
     const listingKey = `${snapshot.source.id}:${row.externalId}`;
     const previous = db.observations.find((item) => item.listingKey === listingKey);
     if (!previous) continue;
@@ -219,9 +294,10 @@ export function applySnapshot(db, snapshot, runId, now = new Date(), reviewOrdin
     contentSha256,
     importedAt: ingestedAt,
     expiresAt,
+    suppressed,
   });
   const changed = [];
-  for (const row of snapshot.observations) {
+  for (const row of accepted) {
     const listingKey = `${snapshot.source.id}:${row.externalId}`;
     const previous = db.observations.find((item) => item.listingKey === listingKey) ?? null;
     const hasNewSourceObservation = !previous || Date.parse(row.observedAt) > Date.parse(previous.lastSeenAt);
@@ -237,6 +313,7 @@ export function applySnapshot(db, snapshot, runId, now = new Date(), reviewOrdin
       state: row.state,
       matchLevel: row.matchLevel,
       matchNote: row.matchNote,
+      reviewLedgerId: ledgerId,
       price: row.price,
       shippingPrice: row.shippingPrice,
       ...(row.settlementEvidenceRef ? { settlementEvidenceRef: row.settlementEvidenceRef } : {}),
@@ -264,12 +341,13 @@ export function applySnapshot(db, snapshot, runId, now = new Date(), reviewOrdin
     lastSuccessAt: ingestedAt,
     lastRunId: runId,
     lastError: null,
-    recordCount: snapshot.observations.length,
+    recordCount: db.observations.filter((row) => row.sourceId === snapshot.source.id).length,
     retentionUntil,
     coverage: snapshot.coverage,
   };
   return {
-    imported: snapshot.observations.length,
+    imported: accepted.length,
+    suppressed,
     eventsAdded: changed.reduce((sum, row) => sum + row.eventCount, 0),
     duplicate: false,
   };

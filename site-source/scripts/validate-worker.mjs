@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createHash } from "node:crypto";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const routes = [
@@ -8,6 +9,7 @@ const routes = [
   ["/index.html", "index.html", "text/html; charset=utf-8"],
   ["/assets/favicon.svg", "assets/favicon.svg", "image/svg+xml; charset=utf-8"],
   ["/assets/market.js", "assets/market.js", "text/javascript; charset=utf-8"],
+  ["/assets/og-preview.png", "assets/og-preview.png", "image/png"],
   ["/assets/record-flow.svg", "assets/record-flow.svg", "image/svg+xml; charset=utf-8"],
   ["/assets/site.css", "assets/site.css", "text/css; charset=utf-8"],
   ["/data/market.json", "data/market.json", "application/json; charset=utf-8"],
@@ -64,6 +66,7 @@ export async function validateWorkerArtifact(siteRoot = root) {
       if (response.headers.get("content-type") !== contentType) fail(route + ": unexpected Content-Type");
       if (!actual.equals(expected)) fail(route + ": Worker response differs from canonical source");
       if (!/^"sha256-[a-f0-9]{64}"$/.test(response.headers.get("etag") ?? "")) fail(route + ": missing SHA-256 ETag");
+      if (response.headers.get("etag") !== '"sha256-' + createHash("sha256").update(expected).digest("hex") + '"') fail(route + ": ETag does not match the canonical bytes");
       if (response.headers.get("cache-control") !== "public, max-age=0, must-revalidate") fail(route + ": unexpected Cache-Control");
       headerCheck(response.headers, route);
 

@@ -1,12 +1,18 @@
 const DATA_URL = "data/market.json";
-const PRICE_LABELS = { asking: "판매 희망가", auction: "경매 낙찰가", sold: "확인된 실거래가", reference: "참고 기록" };
+const PRICE_LABELS = { asking: "판매 희망가", auction: "경매 낙찰 결과", auction_current_bid: "경매 진행 호가", auction_final_bid: "경매 낙찰 결과", sold: "확인된 실거래가", sold_verified: "확인된 실거래가", official_retail: "공식 판매가", reference: "참고 기록" };
+const PRICE_GROUPS = ["asking", "auction_current_bid", "auction_final_bid", "sold_verified", "official_retail", "reference"];
+const priceGroup = (kind) => ({ auction: "auction_final_bid", sold: "sold_verified" })[kind] || kind;
+const matchesKind = (record, kind) => priceGroup(record.kind) === priceGroup(kind);
+const activeAsk = (record) => record.kind === "asking" && ["active_asking", "active_at_check"].includes(record.state);
 const TYPE_ORDER = ["전체", "베이스", "패럴렐", "오토", "렐릭", "묶음", "미분류"];
 const KBO_TEAMS = ["두산 베어스", "한화 이글스", "KIA 타이거즈", "키움 히어로즈", "KT 위즈", "LG 트윈스", "롯데 자이언츠", "NC 다이노스", "삼성 라이온즈", "SSG 랜더스"];
 const RECORD_FILTERS = [
   { id: "all", label: "전체 공개 기록" },
   { id: "asking", label: "매물 희망가" },
-  { id: "auction", label: "경매 결과" },
-  { id: "sold", label: "확인된 실거래가" },
+  { id: "auction_current_bid", label: "경매 진행 호가" },
+  { id: "auction_final_bid", label: "경매 낙찰 결과" },
+  { id: "sold_verified", label: "확인된 실거래가" },
+  { id: "official_retail", label: "공식 판매가" },
   { id: "reference", label: "참고 기록" }
 ];
 const won = new Intl.NumberFormat("ko-KR");
@@ -56,7 +62,7 @@ function safeExternalHref(value) {
 
 function recordsFor(card) {
   const globalRecords = marketData.observations.filter((record) => record.cardId === card.id);
-  return sortRecordsNewestFirst([...globalRecords, ...(card.observations || [])]);
+  return sortRecordsNewestFirst(globalRecords);
 }
 
 function allCards() {
@@ -70,7 +76,7 @@ function findCard(cardId) {
 }
 
 function allRecords() {
-  return [...marketData.observations, ...marketData.candidates.flatMap((card) => card.observations || [])];
+  return [...marketData.observations];
 }
 
 function typeClass(type) {
@@ -82,7 +88,7 @@ function formatPrice(value) {
 }
 
 function countByKind(records, kind) {
-  return records.filter((record) => record.kind === kind).length;
+  return records.filter((record) => matchesKind(record, kind)).length;
 }
 
 function summarizeObservedPrices(records) {
@@ -93,16 +99,73 @@ function summarizeObservedPrices(records) {
   return minimum === maximum ? formatPrice(minimum) : formatPrice(minimum) + "–" + formatPrice(maximum);
 }
 
+function groupExactComparisons(records) {
+  const groups = new Map();
+  records.forEach((record, index) => {
+    if (record.matchLevel !== "exact") return;
+    const verified = /^[a-f0-9]{64}$/.test(record.comparisonKey || "");
+    const key = verified ? record.comparisonKey : "unverified:" + (record.id || index);
+    const group = groups.get(key) || { key, verified, records: [] };
+    group.records.push(record);
+    groups.set(key, group);
+  });
+  return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key)).map((group, index) => ({
+    ...group,
+    label: group.verified ? "동일 실물 조건 " + (index + 1) : "비교 조건 미확인 " + (index + 1),
+  }));
+}
+
 function latestObservedDate(records) {
-  return records.map((record) => record.checkedAt).filter(Boolean).sort().at(-1) || "날짜 미기록";
+  return sortRecordsNewestFirst(records).find((record) => Number.isFinite(observationTimestamp(record.checkedAt)))?.checkedAt || "날짜 미기록";
+}
+
+function observationTimestamp(value) {
+  return Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(value || "") ? value + "T00:00:00+09:00" : value || "");
+}
+
+function formatObservationDate(value) {
+  if (!Number.isFinite(observationTimestamp(value))) return "확인 전";
+  if (value.length === 10) return value.replaceAll("-", ". ") + ".";
+  return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium", timeStyle: "short" }).format(observationTimestamp(value)) + " (한국시간)";
+}
+
+function sourceCoveragePresentation(source, recordCount) {
+  const coverage = source.coverage || {};
+  const scope = coverage.scope ? ` 확인 범위: ${coverage.scope}.` : "";
+  const checkedTime = observationTimestamp(coverage.checkedAt);
+  const stale = Number.isFinite(checkedTime) && Date.now() - checkedTime >= 7 * 86_400_000;
+  const datedLabel = (label) => `${stale ? "갱신 지연 · " : ""}${label} · ${formatObservationDate(coverage.checkedAt)}`;
+  if (coverage.state === "access_blocked") return {
+    stale,
+    label: datedLabel("접근 차단"),
+    description: "마지막 확인 때 출처에 접근하지 못해 매물 유무를 확인하지 못했습니다." + scope
+  };
+  if (coverage.state === "partial_scan") return {
+    stale,
+    label: datedLabel("일부 확인"),
+    description: "마지막 확인에서 일부 범위만 확인했으며 전체 출처 자료를 뜻하지 않습니다." + scope
+  };
+  if (coverage.state === "complete_scope_scan") return {
+    stale,
+    label: datedLabel("범위 확인 완료"),
+    description: recordCount === 0
+      ? "확인 당시 범위에서 새로 공개할 가격 근거가 확인되지 않았습니다." + scope
+      : "기록 수와 가격별 확인일은 아래 공개 기록에서 확인할 수 있습니다." + scope
+  };
+  return {
+    stale: false,
+    label: "확인 전",
+    description: "아직 이 출처를 확인하지 않았습니다. 공개 기록 0건은 매물 부재를 뜻하지 않습니다."
+  };
 }
 
 function observationAgeLabel(checkedAt) {
-  const timestamp = Date.parse(checkedAt || "");
+  const timestamp = observationTimestamp(checkedAt);
   if (!Number.isFinite(timestamp)) return "확인일 미기록 · 현재 상태 미확인";
-  const ageDays = Math.floor((Date.now() - timestamp) / 86_400_000);
-  if (ageDays >= 7) return `과거 관찰 ${checkedAt} · ${ageDays}일 경과 · 현재 노출 미확인`;
-  return `마지막 관찰 ${checkedAt} · 현재 노출 재확인 전`;
+  if (timestamp > Date.now() + 300_000) return "확인일 오류 · 현재 상태 미확인";
+  const ageDays = Math.max(0, Math.floor((Date.now() - timestamp) / 86_400_000));
+  if (ageDays >= 7) return `과거 관찰 ${formatObservationDate(checkedAt)} · ${ageDays}일 경과 · 현재 노출 미확인`;
+  return `마지막 관찰 ${formatObservationDate(checkedAt)} · 현재 노출 재확인 전`;
 }
 
 function observationStateLabel(record) {
@@ -112,7 +175,9 @@ function observationStateLabel(record) {
   if (record.kind === "reference") return "범용 참고 · 카드별 가격 비교 제외";
   if (record.kind === "asking") return record.matchLevel === "exact" ? "확인 당시 판매 희망가 · 카드 정보 일치" : "확인 당시 판매 희망가 · 카드 후보";
   if (["sold", "sold_verified"].includes(record.kind)) return "판매 상태와 체결 금액 확인";
-  if (["auction", "auction_final_bid", "auction_current_bid"].includes(record.kind)) return "경매 기록 · 호가와 낙찰 결과 구분";
+  if (record.kind === "auction_current_bid") return "진행 중 확인한 입찰가 · 낙찰·정산 금액 아님";
+  if (["auction", "auction_final_bid"].includes(record.kind)) return "경매 종료 낙찰 결과 · 결제·정산 확인과 별도";
+  if (record.kind === "official_retail") return "공식 판매처 표시 가격 · 개별 재판매 거래가와 별도";
   return "확인 당시 가격 기록";
 }
 
@@ -126,8 +191,9 @@ function postedAgeMinutes(record) {
 
 function sortRecordsNewestFirst(records) {
   return [...records].sort((a, b) => {
-    const dateOrder = String(b.checkedAt || "").localeCompare(String(a.checkedAt || ""));
-    if (dateOrder) return dateOrder;
+    const aTime = observationTimestamp(a.checkedAt), bTime = observationTimestamp(b.checkedAt);
+    if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) return bTime - aTime;
+    if (Number.isFinite(aTime) !== Number.isFinite(bTime)) return Number.isFinite(aTime) ? -1 : 1;
     const aAge = postedAgeMinutes(a);
     const bAge = postedAgeMinutes(b);
     if (Number.isFinite(aAge) && Number.isFinite(bAge)) return aAge - bAge;
@@ -143,6 +209,12 @@ function priceEvidenceLine(label, records, note) {
   return "<div class=\"card-price-line\"><span class=\"card-price-label\">" + label + " <b>" + records.length + "건</b></span><strong class=\"card-price-value\">" + summarizeObservedPrices(records) + "</strong><span class=\"card-price-note\">" + note + " · 상품가 기준, 배송비 별도 · " + escapeHTML(observationAgeLabel(checked)) + "</span></div>";
 }
 
+function candidateEvidenceLine(label, records, note) {
+  if (!records.length) return "";
+  const checked = latestObservedDate(records);
+  return "<div class=\"card-price-line\"><span class=\"card-price-label\">" + label + " <b>" + records.length + "건</b></span><strong class=\"card-price-value\">개별 기록</strong><span class=\"card-price-note\">" + note + " · 후보 기록끼리는 가격 범위를 계산하지 않습니다 · " + escapeHTML(observationAgeLabel(checked)) + "</span></div>";
+}
+
 function renderFilterOptions() {
   const types = TYPE_ORDER.map((type) => `<button class="filter-choice" type="button" data-type="${escapeHTML(type)}" aria-pressed="${type === selectedType}">${escapeHTML(type)}</button>`).join("");
   ui.types.innerHTML = types;
@@ -156,7 +228,7 @@ function renderFilterOptions() {
 
   const rows = RECORD_FILTERS.map(({ id, label }) => {
     const records = allRecords();
-    const count = id === "all" ? records.length : records.filter((item) => item.kind === id).length;
+    const count = id === "all" ? records.length : countByKind(records, id);
     return `<button class="filter-choice" type="button" data-record="${id}" aria-pressed="${id === selectedRecord}"><span>${label}</span><span class="choice-count">${count}</span></button>`;
   }).join("");
   ui.records.innerHTML = rows;
@@ -176,18 +248,14 @@ function renderSources() {
   const entries = marketData.sources.map((source) => {
     const sourceRecords = records.filter((record) => record.sourceId === source.id);
     const count = sourceRecords.length;
-    const lastChecked = sourceRecords.map((record) => record.checkedAt).filter(Boolean).sort().at(-1);
-    const priceRecords = sourceRecords.filter((record) => record.kind !== "reference").length;
-    const references = countByKind(sourceRecords, "reference");
+    const lastChecked = latestObservedDate(sourceRecords);
     const checked = count
       ? `공개 기록 ${count}건 · ${escapeHTML(observationAgeLabel(lastChecked))}`
       : "공개 가격 기록 0건";
-    const emptyNote = count ? "" : (source.note || "아직 공개 가능한 가격 기록이 없습니다. 플랫폼에 매물이 없다는 뜻은 아닙니다.");
     const sourceHref = safeExternalHref(source.url);
     const sourceLink = sourceHref ? `<a href="${escapeHTML(sourceHref)}" target="_blank" rel="noopener noreferrer">출처 열기 ↗</a>` : "<span>출처 링크 없음</span>";
-    const status = source.status;
-    const description = count ? source.note : emptyNote;
-    return `<article class="source-card"><div class="source-card-top"><h3>${escapeHTML(source.name)}</h3><span class="source-kind">${escapeHTML(source.kind)}</span></div><p class="source-status">${escapeHTML(status)}</p><p class="source-description">${escapeHTML(description)}</p><div class="source-meta"><span>${checked}</span>${sourceLink}</div></article>`;
+    const coverage = sourceCoveragePresentation(source, count);
+    return `<article class="source-card"><div class="source-card-top"><h3>${escapeHTML(source.name)}</h3><span class="source-kind">${escapeHTML(source.kind)}</span></div><p class="source-status" data-coverage-state="${escapeHTML(source.coverage?.state || "not_checked")}" data-coverage-stale="${coverage.stale}">${escapeHTML(coverage.label)}</p><p class="source-description">${escapeHTML(coverage.description)}</p><div class="source-meta"><span>${checked}</span>${sourceLink}</div></article>`;
   }).join("");
   document.querySelector("#source-grid").innerHTML = entries;
   renderObservationList(records);
@@ -223,17 +291,17 @@ function renderStats() {
   const records = allRecords();
   const cards = marketData.candidates.length;
   const officialCards = marketData.officialCatalog.cards.length;
-  const candidateAskRecords = records.filter((record) => record.sourceId === "bunjang" && record.kind === "asking" && record.matchLevel === "candidate");
-  const candidateListings = candidateAskRecords.length;
-  const exactMatches = records.filter((record) => record.kind === "asking" && record.matchLevel === "exact").length;
-  const exactSoldRecords = records.filter((record) => record.kind === "sold" && record.matchLevel === "exact").length;
+  const askingRecords = records.filter(activeAsk);
+  const candidateListings = askingRecords.length;
+  const exactMatches = askingRecords.filter((record) => record.matchLevel === "exact").length;
+  const exactSoldRecords = records.filter((record) => matchesKind(record, "sold_verified") && record.matchLevel === "exact").length;
   const genericReferences = countByKind(records, "reference");
   document.querySelector("#stat-cards").textContent = `${cards}종`;
   document.querySelector("#catalog-scope-count").textContent = `정식 체크리스트 ${officialCards}종 · 판매글 후보 ${cards}종`;
   document.querySelector("#catalog-scope-explainer").textContent = officialCards
     ? "정식 목록과 판매글 후보를 구분해 보여드려요. 카드 번호·패럴렐·시리얼이 확인되지 않으면 같은 카드 기록으로 묶지 않습니다."
     : `정식 체크리스트는 아직 확인 중이라 판매글 후보 ${cards}종만 보여드려요. 후보가 전체 카드 목록을 뜻하지는 않습니다.`;
-  document.querySelector("#stat-listings").textContent = `${candidateListings}건`;
+  document.querySelector("#stat-listings").textContent = `${records.length}건`;
   document.querySelector("#stat-exact").textContent = `${exactMatches}건`;
   document.querySelector("#stat-sold").textContent = `${exactSoldRecords}건`;
   document.querySelector("#stat-observation-total").textContent = `공개 가격 기록 ${records.length}건`;
@@ -242,14 +310,12 @@ function renderStats() {
   document.querySelector("#stat-snapshot-status").textContent = records.length
     ? observationRecency
     : "아직 공개한 가격 기록이 없습니다.";
-  document.querySelector("#hero-latest-date").textContent = latestObservation === "날짜 미기록"
-    ? "확인 날짜 미기록"
-    : latestObservation.replaceAll("-", ". ") + ".";
+  document.querySelector("#hero-latest-date").textContent = formatObservationDate(latestObservation);
   document.querySelector("#hero-record-status").textContent = records.length
     ? "정식 체크리스트 " + officialCards + "종 · 판매글 후보 " + cards + "종 · 매물 희망가 " + candidateListings + "건 · 같은 카드 확인 " + exactMatches + "건 · 실제 판매가 확인 " + exactSoldRecords + "건 · " + observationRecency
     : "정식 카드 목록 확인 중 · 판매글 후보 " + cards + "종 · 공개 가격 기록 0건.";
   document.querySelector("#source-coverage-summary").textContent = records.length
-    ? "번개장터 매물 희망가 " + candidateListings + "건과 범용 참고 " + genericReferences + "건을 공개합니다. 카드 정보가 일치한 매물은 " + exactMatches + "건, 확인된 실제 판매가는 " + exactSoldRecords + "건입니다. " + observationRecency + "."
+    ? "전체 플랫폼의 매물 희망가 " + candidateListings + "건과 범용 참고 " + genericReferences + "건을 공개합니다. 카드 정보가 일치한 매물은 " + exactMatches + "건, 확인된 실제 판매가는 " + exactSoldRecords + "건입니다. " + observationRecency + "."
     : "현재 출처와 카드 정보를 대조해 공개한 가격 기록은 없습니다. 매물이 없다는 뜻은 아니며, 원문 확인을 마친 자료부터 추가합니다.";
   renderSources();
 }
@@ -263,7 +329,7 @@ function filteredCards() {
     return (!query || values.includes(query))
       && (team === "all" || card.team === team)
       && (selectedType === "전체" || card.type === selectedType)
-      && (selectedRecord === "all" || records.some((record) => record.kind === selectedRecord))
+      && (selectedRecord === "all" || records.some((record) => matchesKind(record, selectedRecord)))
       && (!favoritesOnly || favorites.has(card.id));
   });
   const sort = ui.sort.value;
@@ -276,15 +342,19 @@ function cardMarkup(card) {
   const title = `${card.player}${card.cardNumber ? ` ${card.cardNumber}` : ""}`;
   const serial = card.serial ? `<span class="serial">${escapeHTML(card.serial)}</span>` : "";
   const favorite = favorites.has(card.id);
-  const candidateAsks = records.filter((record) => record.kind === "asking" && record.matchLevel === "candidate");
-  const exactAsks = records.filter((record) => record.kind === "asking" && record.matchLevel === "exact");
-  const exactSold = records.filter((record) => record.kind === "sold" && record.matchLevel === "exact");
-  const candidateSold = records.filter((record) => record.kind === "sold" && record.matchLevel === "candidate");
+  const candidateAsks = records.filter((record) => activeAsk(record) && record.matchLevel === "candidate");
+  const exactAsks = records.filter((record) => activeAsk(record) && record.matchLevel === "exact");
+  const exactAskGroups = groupExactComparisons(exactAsks);
+  const exactSold = records.filter((record) => matchesKind(record, "sold_verified") && record.matchLevel === "exact");
+  const exactSoldGroups = groupExactComparisons(exactSold);
+  const candidateSold = records.filter((record) => matchesKind(record, "sold_verified") && record.matchLevel === "candidate");
   const priceEvidence = [
-    priceEvidenceLine("카드 후보 매물", candidateAsks, "번호·패럴렐 확인 전 · 판매 완료 아님"),
-    priceEvidenceLine("정보 일치 매물", exactAsks, "판매 희망가 · 판매 완료 아님"),
-    priceEvidenceLine("확인된 실거래가", exactSold, "실제 판매와 카드 식별 확인"),
-    priceEvidenceLine("판매 표시는 있으나 카드 확인 전", candidateSold, "판매 완료 표시는 있으나 같은 카드인지 확인 전")
+    candidateEvidenceLine("카드 후보 매물", candidateAsks, "번호·패럴렐 확인 전 · 판매 완료 아님"),
+    ...exactAskGroups.slice(0, 4).map((group) => priceEvidenceLine(group.label + " 희망가", group.records, "판매 희망가 · 판매 완료 아님")),
+    exactAskGroups.length > 4 ? `<p class="card-price-note">추가 실물 비교 조건 ${exactAskGroups.length - 4}개는 상세 보기에서 확인할 수 있습니다.</p>` : "",
+    ...exactSoldGroups.slice(0, 4).map((group) => priceEvidenceLine(group.label + " 확인된 실거래가", group.records, "실제 판매와 카드 식별 확인")),
+    exactSoldGroups.length > 4 ? `<p class="card-price-note">추가 실물 조건의 실거래는 상세 보기에서 확인할 수 있습니다.</p>` : "",
+    candidateEvidenceLine("실거래 확인 · 카드 후보", candidateSold, "정산 근거 확인 · 같은 카드인지 확인 전")
   ].filter(Boolean).join("") || `<p class="card-price-empty">아직 공개한 가격 기록이 없습니다. 출처와 카드 정보를 확인한 뒤 추가합니다.</p>`;
 
   return `<article class="card-item">
@@ -365,15 +435,16 @@ function niceChartMaximum(value) {
   return step * power;
 }
 
-function platformComparisonMarkup(records, activeKind) {
+function platformComparisonMarkup(records, activeKind = "asking", activeSource = "all", activeComparison = "all") {
   const kindLabel = PRICE_LABELS[activeKind] || "가격 기록";
-  const included = records.filter((record) => record.kind === activeKind
+  const included = records.filter((record) => matchesKind(record, activeKind)
     && record.matchLevel !== "generic"
+    && (activeComparison === "all" || (record.matchLevel === "exact" && record.comparisonKey === activeComparison))
     && !["unavailable_on_recheck", "sold_badge_sale_price_unverified", "sold_badge_only"].includes(record.state)
     && Number.isFinite(record.price));
   const maximum = niceChartMaximum(Math.max(...included.map((record) => record.price), 0) * 1.08);
   const tickLabels = [0, maximum / 2, maximum].map((value) => formatPrice(Math.round(value)));
-  const rows = marketData.sources.map((source) => {
+  const rows = marketData.sources.filter((source) => activeSource === "all" || source.id === activeSource).map((source) => {
     const sourceRecords = included.filter((record) => record.sourceId === source.id);
     const pointMarks = sourceRecords.map((record, index) => {
       const position = Math.max(0, Math.min(100, Math.round(record.price / maximum * 100)));
@@ -397,21 +468,26 @@ function platformComparisonMarkup(records, activeKind) {
     return `<article class="price-plot-row"><header class="price-plot-source"><div><h4>${escapeHTML(source.name)}</h4><span>${escapeHTML(source.kind)}</span></div><small>${checked}</small></header><div class="price-plot-body">${track}<div class="price-plot-axis"><span>${tickLabels[0]}</span><span>${tickLabels[1]}</span><span>${tickLabels[2]}</span></div>${list}</div></article>`;
   }).join("");
   const legend = activeKind === "reference" ? "일괄·범용 참고 기록은 카드별 가격 비교에서 제외합니다." : "카드 후보 가격은 같은 카드로 확인되지 않았을 수 있습니다. 번호와 패럴렐을 원문에서 대조하세요.";
-  return `<section class="platform-comparison" aria-labelledby="platform-comparison-title"><div class="platform-comparison-title"><div><span class="section-kicker">${escapeHTML(kindLabel)}</span><h3 id="platform-comparison-title">플랫폼별 가격 기록</h3></div><p>각 점은 확인 당시 판매 희망가입니다. 배송비는 별도이며, 확인된 실거래가와 구분하세요. ${escapeHTML(legend)}</p></div><div class="price-plot-axis-title"><span>낮은 가격</span><span>높은 가격</span></div><div class="price-plot-list">${rows}</div><p class="price-plot-footnote">가격 기록이 없는 플랫폼은 이번 조사에서 확인하지 못한 상태입니다. 매물이 없다는 뜻은 아니며, 현재 판매 여부는 원문에서 확인하세요.</p></section>`;
+  return `<section class="platform-comparison" aria-labelledby="platform-comparison-title"><div class="platform-comparison-title"><div><span class="section-kicker">${escapeHTML(kindLabel)}</span><h3 id="platform-comparison-title">플랫폼별 가격 기록</h3></div><p>각 점은 확인 당시 ${escapeHTML(kindLabel)}입니다. 상품가 기준이며 배송비가 확인되지 않은 기록도 포함됩니다. ${escapeHTML(legend)}</p></div><div class="price-plot-axis-title"><span>낮은 가격</span><span>높은 가격</span></div><div class="price-plot-list">${rows}</div><p class="price-plot-footnote">가격 기록이 없는 플랫폼은 이번 조사에서 확인하지 못한 상태입니다. 매물이 없다는 뜻은 아니며, 현재 판매 여부는 원문에서 확인하세요.</p></section>`;
 }
 
-function renderDialog(card, activeTab = "asking", activeSource = "all", restoreControl = null) {
+function renderDialog(card, activeTab = "asking", activeSource = "all", restoreControl = null, activeComparison = null) {
   const dialogScrollTop = ui.dialog.scrollTop;
   const records = recordsFor(card);
   const cardTitle = card.player + (card.cardNumber ? " " + card.cardNumber : "");
-  const tabLabels = { asking: "판매 희망가", auction: "경매 낙찰가", sold: "확인된 실거래가", reference: "참고 기록" };
+  const tabLabels = PRICE_LABELS;
   const sourceRecords = activeSource === "all" ? records : records.filter((record) => record.sourceId === activeSource);
-  const filtered = sourceRecords.filter((record) => record.kind === activeTab);
+  const filtered = sourceRecords.filter((record) => matchesKind(record, activeTab));
+  const comparisonGroups = groupExactComparisons(filtered);
+  const selectedComparison = activeComparison === "all" ? "all"
+    : activeComparison && comparisonGroups.some((group) => group.key === activeComparison)
+      ? activeComparison
+      : comparisonGroups[0]?.key || "all";
   const rows = filtered.length
     ? filtered.map(recordRow).join("")
     : "<div class=\"record-empty\"><strong>" + PRICE_LABELS[activeTab] + " 기록이 아직 없어요.</strong>이 출처에 매물이 없다는 뜻은 아닙니다.</div>";
-  const tabs = ["asking", "auction", "sold", "reference"].map((kind) => {
-    const amount = sourceRecords.filter((record) => record.kind === kind).length;
+  const tabs = PRICE_GROUPS.map((kind) => {
+    const amount = countByKind(sourceRecords, kind);
     return "<button class=\"record-tab\" type=\"button\" data-tab=\"" + kind + "\" aria-pressed=\"" + (kind === activeTab) + "\">" + tabLabels[kind] + " <span>" + amount + "</span></button>";
   }).join("");
   const sources = [{ id: "all", name: "전체 플랫폼" }].concat(marketData.sources);
@@ -421,6 +497,12 @@ function renderDialog(card, activeTab = "asking", activeSource = "all", restoreC
     const amount = source.id === "all" ? records.length : records.filter((record) => record.sourceId === source.id).length;
     return "<button class=\"source-filter\" type=\"button\" data-source-filter=\"" + escapeHTML(source.id) + "\" aria-pressed=\"" + (source.id === activeSource) + "\">" + escapeHTML(source.name) + " <span>" + amount + "</span></button>";
   }).join("");
+  const comparisonFilters = comparisonGroups.length
+    ? [{ key: "all", label: "전체 조건 · 가격 범위 미계산" }, ...comparisonGroups].map((group, index) => {
+      const value = index === 0 ? "all" : String(index - 1);
+      return "<button class=\"source-filter\" type=\"button\" data-comparison-filter=\"" + value + "\" aria-pressed=\"" + (group.key === selectedComparison) + "\">" + escapeHTML(group.label) + "</button>";
+    }).join("")
+    : "";
   const searchLink = "https://m.bunjang.co.kr/keywords/" + encodeURIComponent("2026 SCC " + card.player);
   const askingRecord = records.find((record) => record.kind === "asking" && record.matchLevel === "exact" && record.url)
     || records.find((record) => record.kind === "asking" && record.matchLevel === "candidate" && record.url);
@@ -431,9 +513,12 @@ function renderDialog(card, activeTab = "asking", activeSource = "all", restoreC
     ? "<a class=\"button button-primary\" href=\"" + escapeHTML(askingHref) + "\" target=\"_blank\" rel=\"noopener noreferrer\">" + (askingRecord.matchLevel === "exact" ? "일치 확인 매물 보기" : "후보 매물 원문 보기") + " <span aria-hidden=\"true\">↗</span></a>"
     : "";
   const evidenceViews = records.length
-    ? platformComparisonMarkup(records)
-      + "<div class=\"source-filters\" role=\"group\" aria-label=\"플랫폼별 기록 필터\">" + sourceFilters + "</div>"
-      + "<div class=\"record-tabs\" role=\"group\" aria-label=\"가격 유형별 기록\">" + tabs + "</div><div class=\"record-list\">" + rows + "</div>"
+    ? "<div class=\"source-filters\" role=\"group\" aria-label=\"플랫폼별 기록 필터\">" + sourceFilters + "</div>"
+      + "<div class=\"record-tabs\" role=\"group\" aria-label=\"가격 유형별 기록\">" + tabs + "</div>"
+      + (comparisonFilters ? "<div class=\"source-filters comparison-filters\" role=\"group\" aria-label=\"실물 비교 조건별 기록\">" + comparisonFilters + "</div>" : "")
+      + (comparisonFilters ? "<p class=\"comparison-condition-note\">그래프에는 선택한 동일 실물 조건만 표시됩니다. 전체 조건을 고르면 기록은 함께 보이지만 서로 다른 시리얼·등급·상태의 가격 범위는 계산하지 않습니다.</p>" : "")
+      + platformComparisonMarkup(records, activeTab, activeSource, selectedComparison)
+      + "<div class=\"record-list\">" + rows + "</div>"
     : "<div class=\"record-empty detail-record-empty\"><strong>이 카드와 연결된 공개 가격 기록이 없습니다.</strong><span>카드 정보와 가격 근거를 확인한 자료가 등록되면 이곳에 표시합니다. 현재 매물 여부는 원문에서 확인해 주세요.</span></div>";
   const catalogLabel = card.catalogStatus === "official" ? "정식 체크리스트" : "판매글 후보";
   const identityNote = card.catalogStatus === "official"
@@ -445,8 +530,13 @@ function renderDialog(card, activeTab = "asking", activeSource = "all", restoreC
     + "<div class=\"visually-hidden\" id=\"dialog-filter-status\" role=\"status\" aria-live=\"polite\"></div>"
     + "<p class=\"draft-confirmation\">실시간 매물 조회는 제공하지 않습니다. 현재 판매 여부와 카드 정보는 원문에서 확인해 주세요.</p>"
     + "<div class=\"dialog-actions\">" + directListing + "<a class=\"button " + (askingRecord ? "button-quiet" : "button-primary") + "\" href=\"" + escapeHTML(searchLink) + "\" target=\"_blank\" rel=\"noopener noreferrer\">번개장터에서 검색 <span aria-hidden=\"true\">↗</span></a><button class=\"button button-quiet\" type=\"button\" data-copy-card-link=\"" + escapeHTML(shareURL.href) + "\">카드 링크 복사</button></div>";
-  ui.dialogContent.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => renderDialog(card, button.dataset.tab, activeSource, { type: "tab", value: button.dataset.tab })));
-  ui.dialogContent.querySelectorAll("[data-source-filter]").forEach((button) => button.addEventListener("click", () => renderDialog(card, activeTab, button.dataset.sourceFilter, { type: "source", value: button.dataset.sourceFilter })));
+  ui.dialogContent.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => renderDialog(card, button.dataset.tab, activeSource, { type: "tab", value: button.dataset.tab }, selectedComparison)));
+  ui.dialogContent.querySelectorAll("[data-source-filter]").forEach((button) => button.addEventListener("click", () => renderDialog(card, activeTab, button.dataset.sourceFilter, { type: "source", value: button.dataset.sourceFilter }, selectedComparison)));
+  ui.dialogContent.querySelectorAll("[data-comparison-filter]").forEach((button) => button.addEventListener("click", () => {
+    const index = Number(button.dataset.comparisonFilter);
+    const comparison = button.dataset.comparisonFilter === "all" ? "all" : comparisonGroups[index]?.key;
+    if (comparison) renderDialog(card, activeTab, activeSource, { type: "comparison", value: button.dataset.comparisonFilter }, comparison);
+  }));
   ui.dialogContent.querySelector("[data-copy-card-link]").addEventListener("click", async (event) => {
     try {
       await navigator.clipboard.writeText(event.currentTarget.dataset.copyCardLink);
@@ -456,8 +546,9 @@ function renderDialog(card, activeTab = "asking", activeSource = "all", restoreC
     }
   });
   if (restoreControl) {
-    const selector = restoreControl.type === "tab" ? "[data-tab]" : "[data-source-filter]";
-    const focusTarget = [...ui.dialogContent.querySelectorAll(selector)].find((button) => button.dataset[restoreControl.type === "tab" ? "tab" : "sourceFilter"] === restoreControl.value);
+    const selector = restoreControl.type === "tab" ? "[data-tab]" : restoreControl.type === "comparison" ? "[data-comparison-filter]" : "[data-source-filter]";
+    const dataKey = restoreControl.type === "tab" ? "tab" : restoreControl.type === "comparison" ? "comparisonFilter" : "sourceFilter";
+    const focusTarget = [...ui.dialogContent.querySelectorAll(selector)].find((button) => button.dataset[dataKey] === restoreControl.value);
     focusTarget?.focus({ preventScroll: true });
     ui.dialog.scrollTop = dialogScrollTop;
     const status = ui.dialogContent.querySelector("#dialog-filter-status");

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { editorialTitleFor } from "./editorial-title.mjs";
 import { validateReviewLedger } from "./validate-review-ledger.mjs";
 import { validateCatalogReviewLedger } from "./validate-catalog-ledger.mjs";
+import { validatePublicCardIdentity } from "./publication-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -18,9 +19,11 @@ const HOSTS = {
   kbomarket: new Set(["kbomarket.com", "www.kbomarket.com"]),
 };
 const REQUIRED_MARKET_SOURCES = ["bunjang", "break", "wyyyes", "community", "kream", "daewon"];
+const SOURCE_COVERAGE_STATES = new Set(["not_checked", "access_blocked", "partial_scan", "complete_scope_scan"]);
 const OBS_FIELDS = new Set([
   "id", "cardId", "kind", "state", "matchLevel", "sourceId", "title", "price", "shippingPrice",
   "checkedAt", "url", "matchNote", "postedTimeAtCheck",
+  "comparisonKey",
 ]);
 const STRING_LIMITS = {
   id: 150, cardId: 120, kind: 40, state: 60, matchLevel: 20, sourceId: 40,
@@ -28,6 +31,24 @@ const STRING_LIMITS = {
 };
 const DATE = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))?$/;
 const PII = /(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:\+?82[- .]?)?0?1[016789][-. ]?\d{3,4}[- .]?\d{4}|계좌번호|전화번호|휴대폰|연락처|오픈채팅|카카오톡\s*(?:ID|아이디))/i;
+const ROOT_FIELDS = new Set(["edition", "status", "candidates", "sources", "observations", "officialCatalog"]);
+const CARD_FIELDS = new Set(["id", "player", "team", "type", "cardNumber", "variant", "serial", "printingIdentity"]);
+const CANDIDATE_FIELDS = new Set([...CARD_FIELDS, "identityStatus", "observations", "photoSources"]);
+
+function publicDate(value, now) {
+  if (typeof value !== "string" || !DATE.test(value)) return false;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return false;
+  const calendar = value.slice(0, 10);
+  const [year, month, day] = calendar.split("-").map(Number);
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(0, 0, 0, 0);
+  if (date.toISOString().slice(0, 10) !== calendar) return false;
+  if (value.length === 10) return calendar <= new Date(now + 9 * 3_600_000).toISOString().slice(0, 10);
+  if (!/T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d/.test(value)) return false;
+  return timestamp <= now + 5 * 60_000;
+}
 
 function validateUrl(raw, sourceId, label, fail) {
   try {
@@ -41,11 +62,14 @@ function validateUrl(raw, sourceId, label, fail) {
   }
 }
 
-export function validateMarket(data, label = "market.json") {
+export function validateMarket(data, label = "market.json", { now = Date.now(), siteRoot = root, pendingRecords = [] } = {}) {
   const errors = [];
   const warningSet = new Set();
   const fail = (message) => errors.push(label + ": " + message);
   if (!data || typeof data !== "object" || Array.isArray(data)) return { errors: [label + ": root must be an object"], warnings: [] };
+  if (!Number.isFinite(now)) throw new Error("market validation clock must be finite");
+  for (const key of Object.keys(data)) if (!ROOT_FIELDS.has(key)) fail("root contains unsupported public field " + key);
+  for (const key of ["edition", "status"]) if (typeof data[key] !== "string" || !data[key].trim() || data[key].length > 160 || PII.test(data[key])) fail(key + " must be a short public label without personal contact information");
   for (const key of ["candidates", "sources", "observations"]) if (!Array.isArray(data[key])) fail(key + " must be an array");
   const official = data.officialCatalog;
   if (!official || typeof official !== "object" || Array.isArray(official)) fail("officialCatalog must be an object");
@@ -58,7 +82,7 @@ export function validateMarket(data, label = "market.json") {
       if (!official.cards.length) fail("verified official catalog needs cards");
       if (typeof official.sourceUrl !== "string" || official.sourceUrl.length > 2048) fail("verified official catalog needs a source URL");
       else { try { const url = new URL(official.sourceUrl); if (url.protocol !== "https:" || url.username || url.password || (url.port && url.port !== "443") || url.search || url.hash) fail("official catalog source must be a canonical public HTTPS URL"); } catch { fail("official catalog source URL is invalid"); } }
-      if (!DATE.test(String(official.verifiedAt ?? "")) || Number.isNaN(Date.parse(official.verifiedAt))) fail("verified official catalog needs verifiedAt");
+      if (!publicDate(official.verifiedAt, now)) fail("verified official catalog needs a valid non-future verifiedAt");
     }
   }
   if (errors.length) return { errors, warnings: [] };
@@ -67,7 +91,7 @@ export function validateMarket(data, label = "market.json") {
   const uniqueIds = (rows, section) => {
     const ids = new Set();
     for (const row of rows) {
-      if (!row || typeof row.id !== "string" || !row.id.trim()) fail(section + " contains an empty id");
+      if (!row || typeof row !== "object" || Array.isArray(row) || typeof row.id !== "string" || !row.id.trim() || row.id.length > 150 || PII.test(row.id)) fail(section + " contains an invalid id");
       else if (ids.has(row.id)) fail(section + " contains a duplicate id");
       else ids.add(row.id);
     }
@@ -80,18 +104,39 @@ export function validateMarket(data, label = "market.json") {
   const sourceIds = uniqueIds(data.sources, "sources");
   for (const id of REQUIRED_MARKET_SOURCES) if (!sourceIds.has(id)) fail("market sources must include the six target platforms; missing " + id);
   uniqueIds(data.observations, "observations");
+  if (errors.length) return { errors, warnings: [] };
   const cardsById = new Map([...data.officialCatalog.cards, ...data.candidates].map((card) => [card.id, card]));
-  const officialCardFields = new Set(["id", "player", "team", "type", "cardNumber", "variant", "serial"]);
-  for (const card of data.officialCatalog.cards) {
-    if (!card || typeof card !== "object" || Array.isArray(card)) { fail("official catalog card must be an object"); continue; }
-    for (const key of Object.keys(card)) if (!officialCardFields.has(key)) fail("official catalog card " + card.id + " contains unsupported field " + key);
-    for (const key of ["player", "team", "type"]) if (typeof card[key] !== "string" || !card[key].trim() || card[key].length > 120) fail("official catalog card " + card.id + " needs a valid " + key);
-    for (const key of ["variant", "cardNumber", "serial"]) if (card[key] != null && (typeof card[key] !== "string" || card[key].length > 120)) fail("official catalog card " + card.id + " has invalid " + key);
+  for (const card of cardsById.values()) {
+    const allowed = officialCardIds.has(card.id) ? CARD_FIELDS : CANDIDATE_FIELDS;
+    for (const key of Object.keys(card)) if (!allowed.has(key)) fail("card " + card.id + " contains unsupported public field " + key);
+    for (const key of ["player", "team", "type"]) if (typeof card[key] !== "string" || !card[key].trim() || card[key].length > 120) fail("card " + card.id + " needs a valid " + key);
+    for (const key of ["variant", "cardNumber", "serial"]) if (card[key] != null && (typeof card[key] !== "string" || card[key].length > 120)) fail("card " + card.id + " has invalid " + key);
+    if (card.identityStatus != null && (typeof card.identityStatus !== "string" || card.identityStatus.length > 1000)) fail("card " + card.id + " has invalid identityStatus");
+    if (Object.hasOwn(card, "observations") && (!Array.isArray(card.observations) || card.observations.length)) fail("card " + card.id + " nested observations must stay empty; use the reviewed global observations array");
+    for (const value of Object.values(card)) if (typeof value === "string" && PII.test(value)) fail("card " + card.id + " appears to contain personal contact information");
+    if (card.printingIdentity != null) {
+      try { validatePublicCardIdentity(card); } catch (error) { fail("card " + card.id + ": " + error.message); }
+    }
   }
 
   for (const source of data.sources) {
-    for (const key of Object.keys(source)) if (!new Set(["id", "name", "kind", "status", "note", "url"]).has(key)) fail("source contains unsupported field " + key);
+    const allowedSourceFields = new Set(["id", "name", "kind", "status", "note", "url", "coverage"]);
+    for (const key of Object.keys(source)) if (!allowedSourceFields.has(key)) fail("source contains unsupported field " + key);
     validateUrl(source.url, source.id, "source " + source.id, fail);
+    for (const key of ["id", "name", "kind", "status", "note"]) if (typeof source[key] !== "string" || !source[key].trim() || source[key].length > (key === "note" ? 1000 : 160) || PII.test(source[key])) fail("source has invalid public " + key);
+    const coverage = source.coverage;
+    if (!coverage || typeof coverage !== "object" || Array.isArray(coverage)) {
+      fail("source " + source.id + " needs a public coverage state");
+    } else {
+      for (const key of Object.keys(coverage)) if (!new Set(["state", "checkedAt", "scope"]).has(key)) fail("source " + source.id + " coverage contains unsupported field " + key);
+      if (!SOURCE_COVERAGE_STATES.has(coverage.state)) fail("source " + source.id + " has an unknown coverage state");
+      if (coverage.state === "not_checked") {
+        if (coverage.checkedAt !== null || coverage.scope !== null) fail("unverified source " + source.id + " must not claim a checked date or scope");
+      } else {
+        if (!publicDate(coverage.checkedAt, now)) fail("source " + source.id + " needs a valid non-future coverage checkedAt");
+        if (typeof coverage.scope !== "string" || !coverage.scope.trim() || coverage.scope.length > 500 || PII.test(coverage.scope)) fail("source " + source.id + " needs a concise public coverage scope");
+      }
+    }
   }
 
   for (const card of cardsById.values()) {
@@ -107,6 +152,7 @@ export function validateMarket(data, label = "market.json") {
       if (typeof photo.title !== "string" || !photo.title.trim() || photo.title.length > 180) fail("card " + card.id + " photo source needs a concise title");
       if (typeof photo.note !== "string" || photo.note.length > 500) fail("card " + card.id + " photo source has an invalid note");
       validateUrl(photo.url, photo.sourceId, "card " + card.id + " photo source", fail);
+      for (const key of ["title", "note"]) if (PII.test(String(photo[key] ?? ""))) fail("photo source appears to contain personal contact information");
     }
   }
 
@@ -123,7 +169,9 @@ export function validateMarket(data, label = "market.json") {
     if (!kinds.has(row.kind)) fail("observation " + row.id + " has unknown kind");
     if (!states.has(row.state)) fail("observation " + row.id + " has unknown state");
     if (!matches.has(row.matchLevel)) fail("observation " + row.id + " has unknown matchLevel");
-    if (!DATE.test(String(row.checkedAt ?? "")) || Number.isNaN(Date.parse(row.checkedAt))) fail("observation " + row.id + " has invalid checkedAt");
+    if (row.matchLevel === "exact" && !/^[a-f0-9]{64}$/.test(row.comparisonKey ?? "")) fail("exact observation " + row.id + " requires a verified comparisonKey");
+    if (row.matchLevel !== "exact" && row.comparisonKey != null) fail("unconfirmed observation " + row.id + " cannot carry a comparisonKey");
+    if (!publicDate(row.checkedAt, now)) fail("observation " + row.id + " has invalid or future checkedAt");
     if (typeof row.title !== "string" || !row.title.trim()) fail("observation " + row.id + " needs a title");
     try {
       if (row.title !== editorialTitleFor(row, cardsById)) fail("observation " + row.id + " title must use its generated editorial label");
@@ -145,11 +193,11 @@ export function validateMarket(data, label = "market.json") {
     }
     for (const key of ["title", "matchNote"]) if (PII.test(String(row[key] ?? ""))) fail("observation " + row.id + " appears to contain personal contact information");
   }
-  const ledger = validateReviewLedger(data, root);
+  const ledger = validateReviewLedger(data, siteRoot, { now, pendingRecords });
   if (ledger.missingCount > 0) fail("public observations must all have private source-review records; missing " + ledger.missingCount);
   for (const warning of ledger.warnings) warningSet.add(warning);
   for (const error of ledger.errors) fail("private review ledger: " + error);
-  const catalogReview = validateCatalogReviewLedger(data, root);
+  const catalogReview = validateCatalogReviewLedger(data, siteRoot, { now });
   for (const error of catalogReview.errors) fail("private catalog review: " + error);
   return { errors, warnings: [...warningSet] };
 }
