@@ -41,7 +41,7 @@
     },
     {
       "path": "docs/HANDOFF.md",
-      "sha256": "630c390264641f3960a6072452838bd96900d2bd042c10cd3a0c88d647e07e87"
+      "sha256": "5acc9ec90a8a9774e3dcc7344340eb3077e392f6f4b0d410ddbae686c27b7982"
     },
     {
       "path": "docs/KNOWN_LIMITATIONS.md",
@@ -53,11 +53,11 @@
     },
     {
       "path": "docs/PUBLICATION.md",
-      "sha256": "022563a5ad2b7929f8503d64e9180049f776231347545c132c3cc800e0c3e25f"
+      "sha256": "ffb6c531d3cf8cfd0418d1bc15560fb723f6ae8ef3d438f36a8a9c7e2b18eb5a"
     },
     {
       "path": "package.json",
-      "sha256": "1868443de8427de529bc51e6b47ca633ce7162bc550367c59301a434d119dcc7"
+      "sha256": "3b9b81799fe95d7cf113ac52ed5345b33014fe7fdcbf599eb67c44cb55489fa9"
     },
     {
       "path": "README.md",
@@ -77,7 +77,7 @@
     },
     {
       "path": "scripts/market-ops.mjs",
-      "sha256": "30dc606b741d7218b52b2c0f0635a57f8c15bdae69268f8cc0fd3ca2522653d8"
+      "sha256": "ab40c1166c807512d61ae02aebdc08527471354bf819c1660246f525edb1fd27"
     },
     {
       "path": "scripts/market-ops/catalog.mjs",
@@ -161,7 +161,7 @@
     },
     {
       "path": "scripts/market-ops/store.mjs",
-      "sha256": "2d76a01b79ddf839e86800f85a29cc70f271138801054f7feab6cfa92eb48c93"
+      "sha256": "c2203eabec9078b1926c0fc9d0a13057fcf353d67de5081d1e61b56f1667a9bc"
     },
     {
       "path": "scripts/public-preflight.mjs",
@@ -169,7 +169,7 @@
     },
     {
       "path": "SECURITY.md",
-      "sha256": "e036382691171735d037bb150997ea53fa14789a19e54cbdede404486c031b76"
+      "sha256": "831e2ff96d6e1050c6befd676f14786a6087b3c47dc37048f225615f237f9129"
     },
     {
       "path": "site-source/.openai/hosting.example.json",
@@ -282,6 +282,14 @@
     {
       "path": "site-source/sitemap.xml",
       "sha256": "8e37622e02c8959eec31f2e5052c8f36eefd736ab24f9b1a2933f91acbfe9308"
+    },
+    {
+      "path": "scripts/market-ops/private-storage.mjs",
+      "sha256": "d573eca57ed63022ebbf4476617d02e6f0d582a22c8124a3b013306697e44f86"
+    },
+    {
+      "path": "scripts/market-ops/private-storage.test.mjs",
+      "sha256": "1d0d7a570b9aebe18996671bc4b56c2a2300fc69f6e0d749fb39461bd7d79ef3"
     }
   ]
 }

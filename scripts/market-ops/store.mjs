@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, lstat } from "node:fs/promises";
 import path from "node:path";
 import { SOURCE_CATALOG } from "./catalog.mjs";
+import { privateDirectory } from "./private-storage.mjs";
 
 export const DB_SCHEMA_VERSION = 1;
 const MAX_RUNS = 200;
@@ -153,13 +154,25 @@ async function acquireLock(lockPath) {
 }
 
 export async function withDatabase(dataDir, work) {
-  await mkdir(dataDir, { recursive: true });
-  const dbPath = path.join(dataDir, "market-ops.json");
-  const lockPath = path.join(dataDir, "market-ops.lock");
+  const absoluteDataDir = path.resolve(dataDir);
+  const privateParent = path.dirname(absoluteDataDir);
+  if (path.basename(privateParent) === ".ops-private") {
+    await privateDirectory(path.dirname(privateParent), [path.basename(absoluteDataDir)], { create: true });
+  } else {
+    await mkdir(absoluteDataDir, { recursive: true });
+    const directoryStat = await lstat(absoluteDataDir);
+    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new Error("local database storage must use a real directory, not a symlink");
+  }
+  const dataDirectoryStat = await lstat(absoluteDataDir);
+  if (!dataDirectoryStat.isDirectory() || dataDirectoryStat.isSymbolicLink()) throw new Error("local database storage must use a real directory, not a symlink");
+  const dbPath = path.join(absoluteDataDir, "market-ops.json");
+  const lockPath = path.join(absoluteDataDir, "market-ops.lock");
   const handle = await acquireLock(lockPath);
   try {
     let db;
     try {
+      const dbStat = await lstat(dbPath);
+      if (!dbStat.isFile() || dbStat.isSymbolicLink() || dbStat.size > 64 * 1024 * 1024) throw new Error("expected a regular local database under 64 MiB");
       db = JSON.parse(await readFile(dbPath, "utf8"));
       assertDatabase(db);
     } catch (error) {
@@ -190,7 +203,19 @@ export async function withDatabase(dataDir, work) {
 }
 
 export async function readDatabase(dataDir) {
-  const file = path.join(dataDir, "market-ops.json");
+  const absoluteDataDir = path.resolve(dataDir);
+  const privateParent = path.dirname(absoluteDataDir);
+  let directory;
+  if (path.basename(privateParent) === ".ops-private") {
+    directory = await privateDirectory(path.dirname(privateParent), [path.basename(absoluteDataDir)]);
+    if (!directory) return null;
+  } else {
+    try { directory = await lstat(absoluteDataDir); }
+    catch (error) { if (error.code === "ENOENT") return null; throw error; }
+    if (!directory.isDirectory() || directory.isSymbolicLink()) throw new Error("local database storage must use a real directory, not a symlink");
+    directory = absoluteDataDir;
+  }
+  const file = path.join(directory, "market-ops.json");
   try {
     const stat = await lstat(file);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024 * 1024) throw new Error("expected a regular local database under 64 MiB");

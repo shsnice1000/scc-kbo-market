@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { SOURCE_CATALOG } from "./market-ops/catalog.mjs";
 import { runIngest, runRefresh } from "./market-ops/refresh.mjs";
 import { validateSnapshot } from "./market-ops/snapshot.mjs";
@@ -17,6 +17,7 @@ import { buildMatchReviewTemplateV2 } from "./market-ops/identity.mjs";
 import { readReviewQueue, updateReviewQueue, upsertReviewCase, recordMatchDecision, summarizeReviewQueue } from "./market-ops/review-queue.mjs";
 import { buildSampleReadiness, formatSampleReadiness } from "./market-ops/sample-readiness.mjs";
 import { parseRefreshArgs } from "./market-ops/refresh-args.mjs";
+import { ensurePrivateDirectory, privateDirectory, resolvePrivateFile } from "./market-ops/private-storage.mjs";
 import { createReadStream } from "node:fs";
 import { buildPublicationDraft, createPublicationSelectionTemplate, readPublicationSelection, writePublicationDraft } from "./market-ops/publication-export.mjs";
 
@@ -72,21 +73,11 @@ function isWithinDirectory(parent, target) {
 }
 
 async function resolvePrivateBunjangFile(filePath, label) {
-  const privateRoot = path.join(root, ".ops-private");
-  const privateDir = path.join(root, ".ops-private", "bunjang");
-  const inputPath = path.resolve(root, filePath);
-  const privateRootStat = await lstat(privateRoot).catch(() => null);
-  const privateDirStat = await lstat(privateDir).catch(() => null);
-  if (!privateRootStat?.isDirectory() || privateRootStat.isSymbolicLink() || !privateDirStat?.isDirectory() || privateDirStat.isSymbolicLink()) {
-    throw new Error("Bunjang private config path must use real .ops-private/bunjang directories");
-  }
-  const privateDirReal = await realpath(privateDir).catch(() => null);
-  if (!privateDirReal) throw new Error("Bunjang collector config directory is missing; create .ops-private/bunjang after confirming partner approval");
-  const inputStat = await lstat(inputPath).catch(() => null);
-  if (!inputStat?.isFile() || inputStat.isSymbolicLink()) throw new Error(`${label} must be a regular, non-symlink file under .ops-private/bunjang`);
-  const fileReal = await realpath(inputPath);
-  if (!isWithinDirectory(privateDirReal, fileReal)) throw new Error(`${label} must resolve inside .ops-private/bunjang`);
-  return fileReal;
+  const bunjangDir = await privateDirectory(root, ["bunjang"]);
+  if (!bunjangDir) throw new Error("Bunjang collector config directory is missing; create .ops-private/bunjang after confirming partner approval");
+  const { resolved } = await resolvePrivateFile(root, filePath, label);
+  if (!isWithinDirectory(bunjangDir, resolved)) throw new Error(`${label} must stay inside .ops-private/bunjang`);
+  return resolved;
 }
 
 async function loadBunjangCollector(configArgument) {
@@ -132,12 +123,12 @@ async function loadBunjangCollector(configArgument) {
 }
 
 async function listInboxSnapshots() {
-  const inboxDir = path.join(root, ".ops-private", "inbox");
+  const inboxDir = await privateDirectory(root, ["inbox"]);
+  if (!inboxDir) throw new Error("reviewed snapshot inbox does not exist; create .ops-private/inbox first");
   let entries;
   try {
     entries = await readdir(inboxDir, { withFileTypes: true });
   } catch (error) {
-    if (error.code === "ENOENT") throw new Error("reviewed snapshot inbox does not exist; create .ops-private/inbox first");
     throw error;
   }
   const files = entries
@@ -151,8 +142,7 @@ async function listInboxSnapshots() {
 async function createTemplates(sourceId) {
   const selected = sourceId ? SOURCE_CATALOG.filter((source) => source.id === sourceId) : SOURCE_CATALOG;
   if (!selected.length) throw new Error(`unknown source id: ${sourceId}`);
-  const templateDir = path.join(root, ".ops-private", "templates");
-  await mkdir(templateDir, { recursive: true });
+  const templateDir = await ensurePrivateDirectory(root, ["templates"]);
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
   const created = [];
   for (const source of selected) {
@@ -166,8 +156,7 @@ async function createTemplates(sourceId) {
 }
 
 async function createBunjangSearchTemplate() {
-  const templateDir = path.join(root, ".ops-private", "bunjang");
-  await mkdir(templateDir, { recursive: true });
+  const templateDir = await ensurePrivateDirectory(root, ["bunjang"]);
   const files = [
     {
       path: path.join(templateDir, "collector-config.json"),
@@ -211,17 +200,7 @@ async function createBunjangSearchTemplate() {
 }
 
 async function privateInputPath(inputPath, label) {
-  const privateRoot = await realpath(path.join(root, ".ops-private"));
-  let resolved;
-  try {
-    resolved = await realpath(path.resolve(inputPath));
-  } catch {
-    throw new Error(`${label} cannot be accessed`);
-  }
-  if (!resolved.startsWith(`${privateRoot}${path.sep}`)) throw new Error(`${label} must be stored under .ops-private`);
-  const fileStat = await stat(resolved);
-  if (!fileStat.isFile()) throw new Error(`${label} must be a regular file`);
-  return { resolved, fileStat };
+  return resolvePrivateFile(root, inputPath, label);
 }
 
 async function reviewMatchCase(inputPath) {
@@ -235,8 +214,7 @@ async function reviewMatchCase(inputPath) {
 
 async function createMatchReviewTemplate(caseId) {
   const template = buildMatchReviewTemplateV2(caseId);
-  const templateDir = path.join(root, ".ops-private", "match-cases");
-  await mkdir(templateDir, { recursive: true });
+  const templateDir = await ensurePrivateDirectory(root, ["match-cases"]);
   const filePath = path.join(templateDir, `${caseId}.json`);
   await writeFile(filePath, `${JSON.stringify(template, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
   console.log(`Created private card-match review template: ${path.relative(root, filePath)}`);
@@ -257,8 +235,7 @@ async function decideMatchReviewQueue(caseId, decision, evidenceRef, comparisonG
 }
 
 async function createBunjangCatalogTemplate() {
-  const templateDir = path.join(root, ".ops-private", "templates");
-  await mkdir(templateDir, { recursive: true });
+  const templateDir = await ensurePrivateDirectory(root, ["templates"]);
   const stamp = new Date().toISOString().replace(/[-:.]/g, "");
   const filePath = path.join(templateDir, `bunjang-catalog-${stamp}.json`);
   const template = {
@@ -308,8 +285,7 @@ async function importBunjangCatalog(mode, catalogPath, configPath) {
     throw error;
   }
   validateSnapshot(result.snapshot);
-  const inboxDir = path.join(root, ".ops-private", "inbox");
-  await mkdir(inboxDir, { recursive: true });
+  const inboxDir = await ensurePrivateDirectory(root, ["inbox"]);
   const stamp = new Date().toISOString().replace(/[-:.]/g, "");
   const outputPath = path.join(inboxDir, `bunjang-${mode}-${stamp}.json`);
   await writeFile(outputPath, `${JSON.stringify(result.snapshot, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
@@ -447,8 +423,7 @@ async function createPrivateFollowUpTemplate(noteId) {
       evidenceFile: previous.captureMethod === "manual-browser-ui" ? null : "REPLACE_WITH_WORKSPACE_RELATIVE_IMAGE_PATH",
       privateAuthorization: previous.privateAuthorization,
     };
-    const templateDir = path.join(root, ".ops-private", "private-observations");
-    await mkdir(templateDir, { recursive: true });
+    const templateDir = await ensurePrivateDirectory(root, ["private-observations"]);
     const stamp = new Date().toISOString().replace(/[-:.]/g, "").replace(/Z$/, "Z");
     const filePath = path.join(templateDir, `${noteId}-followup-${stamp}.json`);
     await writeFile(filePath, `${JSON.stringify(template, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
@@ -568,8 +543,10 @@ async function main() {
   if (command === "private-list" && !args.length) return listPrivateNotes();
   if (command === "private-history" && args.length === 1) return showPrivateHistory(args[0]);
   if (command === "sample-readiness" && !args.length) {
+    const sampleDir = await privateDirectory(root, ["sample-prep", "2026-sensation"]);
+    if (!sampleDir) throw new Error("private sample preparation evidence folder is missing");
     const report = await buildSampleReadiness({
-      sampleDir: path.join(root, ".ops-private", "sample-prep", "2026-sensation"),
+      sampleDir,
     });
     console.log(formatSampleReadiness(report));
     return;
